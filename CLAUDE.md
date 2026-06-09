@@ -41,7 +41,7 @@ Key Notion pages: Project Hub `32f89a0c168081059b13ec225170e441` · First Thread
 - **Native** (later): SwiftUI iPad/iPhone. Web validates the conversation model before any Swift.
 - **Data:** Supabase Postgres + pgvector (metadata, single source of truth), Supabase Storage (photos), Cloudflare R2 (video).
 - **Voice:** Hume EVI 3 (live two-way, ZDR) with Claude as BYO-LLM. ElevenLabs is for Walt/produced clips only — not the live Companion.
-- **Brand tokens:** `tokens.css` at repo root. Parchment `#F2E6BC`, Deep River `#1E2A3A`; Cormorant Garamond (display), DM Sans (UI). Honor the Brand Bible.
+- **Brand tokens:** `tokens.css` at repo root. Parchment `#F2E6BC` (canvas), Creek Stone `#1C1712` (ink), Deep River `#1E2A3A` (chrome/dark surfaces); Lora (display), Inter (UI). Honor the Brand Bible.
 
 -----
 
