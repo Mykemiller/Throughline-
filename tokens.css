@@ -3,25 +3,104 @@
  *
  * Canonical CSS custom properties for the Throughline brand surface.
  * Values trace to the Brand Bible v2 (Notion 33289a0c1680815c996cedb8fde4429f),
- * which remains the single source of truth. Keep this file in sync with the
- * Brand Bible — do not invent new brand values here.
+ * Part II (Color) and Part III (Typography). The Brand Bible remains the
+ * single source of truth — keep this file in sync with it; do not invent
+ * new brand values here.
  *
- * Scope: the four foundations named in CLAUDE.md (two core colors, two
- * typefaces). Extend deliberately as the design system is specified.
+ * Governing composition (Brand Bible, "Governing Principle"):
+ *   Parchment dominates the content canvas (~60%).
+ *   Deep River anchors structural and immersive moments (~30%).
+ *   Amber Light is used sparingly and earns its place (~10%).
+ *
+ * Color rule: there is no pure black or pure white in a living forest.
+ *   Never use #000000 or #FFFFFF. All text/background pairs must meet
+ *   WCAG AA (4.5:1). Creek Stone on Parchment = 14.2:1.
  */
 
 :root {
-  /* ---- Color: core palette ---- */
-  --color-parchment: #F2E6BC;   /* warm paper / primary light surface */
-  --color-deep-river: #1E2A3A;  /* deep navy / primary dark surface + ink */
+  /* ============================================================
+   * COLOR — Primary palette
+   * ============================================================ */
+  --color-creek-stone: #1C1712;  /* primary text, wordmark — warm black, never code-black */
+  --color-parchment:   #F2E6BC;  /* primary background — morning light on birch bark, old letter paper */
+  --color-amber-light: #C4873A;  /* primary accent — late afternoon sun through canopy; use only to direct attention */
+  --color-wet-stone:   #6B4C2A;  /* secondary accent — active states, section dividers */
+  --color-creek-moss:  #4A7C59;  /* mid-century era, life events, family memory */
 
-  /* ---- Color: semantic aliases ---- */
-  --color-surface: var(--color-parchment);
-  --color-ink: var(--color-deep-river);
-  --color-background: var(--color-parchment);
-  --color-foreground: var(--color-deep-river);
+  /* ============================================================
+   * COLOR — Secondary palette
+   * ============================================================ */
+  --color-creek-blue:   #5B8FA8; /* the River itself — RESERVED. Means "the water is here." Not decoration. */
+  --color-deep-river:   #1E2A3A; /* deepest water at dusk — contemporary era, system UI chrome, dark surfaces */
+  --color-dry-sand:     #D4CDBF; /* dividers, disabled states, placeholder content */
+  --color-bark-shadow:  #EDE4D0; /* card backgrounds, inset panels */
+  --color-trail-dust:   #7A736A; /* secondary text, captions, metadata */
 
-  /* ---- Typography: families ---- */
-  --font-display: "Cormorant Garamond", Georgia, "Times New Roman", serif;
-  --font-ui: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* ============================================================
+   * COLOR — Semantic aliases
+   * ============================================================ */
+  --color-background:      var(--color-parchment);
+  --color-surface:         var(--color-parchment);
+  --color-surface-card:    var(--color-bark-shadow);
+  --color-surface-dark:    var(--color-deep-river);   /* immersive / system chrome */
+  --color-ink:             var(--color-creek-stone);  /* primary text */
+  --color-ink-secondary:   var(--color-trail-dust);   /* captions, metadata */
+  --color-accent:          var(--color-amber-light);
+  --color-accent-active:   var(--color-wet-stone);
+  --color-divider:         var(--color-dry-sand);
+  --color-disabled:        var(--color-dry-sand);
+  --color-river:           var(--color-creek-blue);   /* reserved — the flowing current of time */
+
+  /* ============================================================
+   * COLOR — Era system (background tone per period)
+   * Brand Bible, "Era Color System"
+   * ============================================================ */
+  --era-frontier:      #C8A87A; /* 1800–1880 — high-contrast noon, daguerreotype */
+  --era-settlement:    #D4BC94; /* 1880–1920 — long late-afternoon shadows, amber-heavy */
+  --era-interwar:      #C9B87A; /* 1920–1945 — overcast, newsprint diffusion */
+  --era-postwar:       #D4C89A; /* 1945–1965 — warm slide-film morning */
+  --era-modern:        #C8C0B0; /* 1965–1995 — matte and even */
+  --era-contemporary:  #BEC4CC; /* 1995–present — blue-green canopy, screen-cool */
+
+  /* ============================================================
+   * TYPOGRAPHY — Families
+   * Brand Bible, Part III. Two typefaces, no more.
+   * Lora for story; Inter for path-finding.
+   * No font substitution beyond the named fallbacks.
+   * ============================================================ */
+  --font-display: "Lora", Georgia, serif;          /* display & editorial — story, stone, the name on the photo */
+  --font-ui:      "Inter", system-ui, sans-serif;  /* UI & functional — clear, reliable wayfinding */
+
+  /* ============================================================
+   * TYPOGRAPHY — Weights
+   * ============================================================ */
+  --font-weight-regular:  400;
+  --font-weight-medium:   500;
+  --font-weight-semibold: 600;
+  --font-weight-bold:     700;
+
+  /* ============================================================
+   * TYPOGRAPHY — Editorial scale (Lora)
+   * ============================================================ */
+  --font-size-display:  72px;  /* era titles, hero headings, onboarding splash (48–72 range) — Bold */
+  --font-size-h1:       32px;  /* River section headings, Moment titles — Bold */
+  --font-size-h2:       24px;  /* person names, subsection headings — SemiBold */
+  --font-size-h3:       18px;  /* card titles, interview headings — Medium */
+  --font-size-body:     16px;  /* narrative, biographical copy — Regular */
+  --font-size-caption:  13px;  /* dates, place names, metadata — Regular */
+
+  /* ============================================================
+   * TYPOGRAPHY — UI scale (Inter)
+   * ============================================================ */
+  --font-size-ui-label:    14px; /* nav items, tab labels, button text — Medium */
+  --font-size-ui-body:     14px; /* form fields, settings, table rows — Regular */
+  --font-size-ui-caption:  12px; /* timestamps, system messages, inline help — Regular */
+  --font-size-ui-micro:    10px; /* status badges, layer tags, era chips — Medium, ALL CAPS */
+
+  /* ============================================================
+   * TYPOGRAPHY — Leading & measure
+   * ============================================================ */
+  --line-height-editorial: 1.6; /* Lora body */
+  --line-height-ui:        1.4; /* Inter UI */
+  --measure-body:          65ch; /* body text should not exceed 65 characters per line */
 }
