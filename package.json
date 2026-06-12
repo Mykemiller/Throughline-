@@ -1,0 +1,21 @@
+{
+  "name": "throughline",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Throughline — multi-product family-history platform (web prototype).",
+  "workspaces": [
+    "packages/*",
+    "server",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace server & npm run dev --workspace apps/web",
+    "dev:server": "npm run dev --workspace server",
+    "dev:web": "npm run dev --workspace apps/web",
+    "typecheck": "tsc -b --noEmit packages/shared server apps/web",
+    "build": "npm run build --workspace apps/web"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,31 @@
+/*
+ * Throughline brand tokens.
+ *
+ * Source of truth for brand values is the Brand Bible v2 (Notion
+ * 33289a0c1680815c996cedb8fde4429f). This file seeds the documented core
+ * tokens so the First Thread voice prototype can render on-brand; extend it
+ * from the Brand Bible rather than inventing new values here.
+ */
+:root {
+  /* Core palette (CLAUDE.md / Brand Bible) */
+  --tl-parchment: #f2e6bc;
+  --tl-deep-river: #1e2a3a;
+
+  /* Derived surfaces (kept minimal — defer to Brand Bible for the full ramp) */
+  --tl-parchment-dim: #e7d9a8;
+  --tl-deep-river-soft: #2b3b50;
+  --tl-ink: #1e2a3a;
+  --tl-ink-soft: rgba(30, 42, 58, 0.66);
+
+  /* Type families */
+  --tl-font-display: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+  --tl-font-ui: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Spacing rhythm */
+  --tl-space-1: 4px;
+  --tl-space-2: 8px;
+  --tl-space-3: 16px;
+  --tl-space-4: 24px;
+  --tl-space-5: 40px;
+  --tl-radius: 14px;
+}
