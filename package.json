@@ -12,7 +12,8 @@
     "dev": "npm run dev --workspace server & npm run dev --workspace apps/web",
     "dev:server": "npm run dev --workspace server",
     "dev:web": "npm run dev --workspace apps/web",
-    "typecheck": "tsc -b --noEmit packages/shared server apps/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
     "build": "npm run build --workspace apps/web"
   },
   "engines": {
