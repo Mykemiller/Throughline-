@@ -57,6 +57,20 @@ export async function fetchSessionState(
   return json(await fetch(`/api/sessions/${sessionId}/state`));
 }
 
+/** Jump to any chapter at the subscriber's request (the visible chapter rail). */
+export async function setChapter(
+  sessionId: string,
+  chapterId: string,
+): Promise<{ snapshot: SessionStateSnapshot }> {
+  return json(
+    await fetch(`/api/sessions/${sessionId}/chapter`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chapterId }),
+    }),
+  );
+}
+
 /** Upload an EXIF-stripped photo; pins to the session's active Moment. */
 export async function uploadPhoto(args: {
   sessionId: string;

@@ -19,6 +19,7 @@
 import type {
   ChapterCompletePayload,
   ChapterId,
+  IntroCompletePayload,
   ClosedScope,
   MomentDraftPayload,
   PendingPhoto,
@@ -67,6 +68,10 @@ export function reviveSnapshot(raw: unknown): SessionStateSnapshot {
       o.confirmedMoments && typeof o.confirmedMoments === 'object'
         ? (o.confirmedMoments as SessionStateSnapshot['confirmedMoments'])
         : {},
+    // Legacy (pre-intro) snapshots revive straight into the walk — never replay
+    // the introduction for a session that was already mid-conversation.
+    phase: o.phase === 'intro' || o.phase === 'walk' ? o.phase : 'walk',
+    subscriberName: typeof o.subscriberName === 'string' ? o.subscriberName : null,
   };
 }
 
@@ -113,6 +118,58 @@ export function advanceChapter(snapshot: SessionStateSnapshot): SessionStateSnap
   const idx = CHAPTER_ORDER.indexOf(snapshot.chapterId);
   const next = CHAPTER_ORDER[idx + 1]!;
   return { ...snapshot, chapterId: next, followUpSpent: false };
+}
+
+/* ── Intro phase ──────────────────────────────────────────────────────── */
+
+/** True while the session is still in Seth's spoken introduction. */
+export function isIntro(snapshot: SessionStateSnapshot): boolean {
+  return snapshot.phase === 'intro';
+}
+
+/**
+ * Apply an intro_complete signal: record the subscriber's name and flip the
+ * session from `intro` into the seven-chapter `walk` (always opening at the
+ * first chapter). Idempotent once already in the walk.
+ */
+export function applyIntroComplete(
+  snapshot: SessionStateSnapshot,
+  payload: IntroCompletePayload,
+): SessionStateSnapshot {
+  const name = payload.name?.trim();
+  return {
+    ...snapshot,
+    phase: 'walk',
+    subscriberName: name ? name : snapshot.subscriberName,
+    chapterId: snapshot.phase === 'intro' ? CHAPTER_ORDER[0]! : snapshot.chapterId,
+    followUpSpent: false,
+  };
+}
+
+/* ── Subscriber-initiated chapter navigation (owner override 2026-06-14) ───── */
+
+/**
+ * Jump directly to any chapter at the subscriber's request (the visible chapter
+ * rail). This deliberately bypasses the forward-only `advanceChapter` rule:
+ * navigation is subscriber-initiated, so order and completeness do not gate it.
+ *
+ * Reverence is preserved absolutely — closedScopes and confirmedMoments are
+ * never touched by a jump; a staged-but-unconfirmed draft is dropped (it
+ * belonged to the chapter being left), and any intro is concluded.
+ */
+export function jumpToChapter(
+  snapshot: SessionStateSnapshot,
+  target: ChapterId,
+): SessionStateSnapshot {
+  if (!CHAPTER_ORDER.includes(target)) return snapshot;
+  if (snapshot.phase === 'walk' && target === snapshot.chapterId) return snapshot;
+  return {
+    ...snapshot,
+    phase: 'walk',
+    chapterId: target,
+    followUpSpent: false,
+    pendingDraft: null,
+  };
 }
 
 /**

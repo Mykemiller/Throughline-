@@ -8,7 +8,8 @@
  */
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import type { ExchangeRole } from '@throughline/shared';
+import type { ChapterId, ExchangeRole } from '@throughline/shared';
+import { CHAPTER_ORDER, jumpToChapter } from '@throughline/shared';
 import { FIRST_THREAD_VOICE, PORT, requireSecrets } from './env.js';
 import { handleClmRequest } from './clm.js';
 import { mintHumeAccessToken } from './humeToken.js';
@@ -115,6 +116,35 @@ app.get('/api/sessions/:id/state', requireFlag, async (req, res) => {
   } catch (err) {
     console.error('[sessions:state]', err);
     res.status(500).json({ error: 'failed to load session state' });
+  }
+});
+
+// Subscriber-initiated chapter navigation (the visible chapter rail). This
+// deliberately allows jumping to any chapter, in any direction (owner override
+// 2026-06-14) — reverence closures are always preserved by jumpToChapter.
+app.post('/api/sessions/:id/chapter', requireFlag, async (req, res) => {
+  const id = req.params.id;
+  const chapterId = req.body?.chapterId as ChapterId | undefined;
+  if (!id) {
+    res.status(400).json({ error: 'session id required' });
+    return;
+  }
+  if (!chapterId || !CHAPTER_ORDER.includes(chapterId)) {
+    res.status(400).json({ error: 'valid chapterId required' });
+    return;
+  }
+  try {
+    const session = await getSession(id);
+    if (!session) {
+      res.status(404).json({ error: 'session not found' });
+      return;
+    }
+    const snapshot = jumpToChapter(session.snapshot, chapterId);
+    await updateSession(id, { snapshot });
+    res.json({ snapshot });
+  } catch (err) {
+    console.error('[sessions:chapter]', err);
+    res.status(500).json({ error: 'failed to set chapter' });
   }
 });
 

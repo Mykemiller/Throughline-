@@ -34,7 +34,7 @@ const RECORD_PAYLOAD_TOOL: Anthropic.Tool = {
     properties: {
       kind: {
         type: 'string',
-        enum: ['moment_draft', 'story_draft', 'closed_topic_event', 'chapter_complete'],
+        enum: ['moment_draft', 'story_draft', 'closed_topic_event', 'chapter_complete', 'intro_complete'],
       },
       title: { type: 'string', description: 'Short title (moment_draft / story_draft).' },
       summary: { type: 'string', description: 'Grounded summary (moment_draft).' },
@@ -54,6 +54,10 @@ const RECORD_PAYLOAD_TOOL: Anthropic.Tool = {
       carryDetail: {
         type: 'string',
         description: 'chapter_complete: one concrete detail to carry into the next chapter.',
+      },
+      name: {
+        type: 'string',
+        description: "intro_complete: the subscriber's name as they gave it.",
       },
     },
     required: ['kind'],
@@ -147,6 +151,9 @@ function coercePayload(input: unknown, chapterId: ChapterId): FirstThreadPayload
   }
   if (kind === 'closed_topic_event' && typeof o.phrase === 'string') {
     return { kind, phrase: o.phrase, source: 'claude', chapterId };
+  }
+  if (kind === 'intro_complete' && typeof o.name === 'string' && o.name.trim() !== '') {
+    return { kind, name: o.name.trim() };
   }
   return null;
 }

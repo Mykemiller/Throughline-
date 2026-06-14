@@ -7,10 +7,13 @@ import { test } from 'node:test';
 import {
   advanceChapter,
   applyChapterComplete,
+  applyIntroComplete,
   canAdvance,
   closeScope,
   detectConfirmation,
   isFinalChapter,
+  isIntro,
+  jumpToChapter,
   recordConfirmedMoment,
   reviveSnapshot,
   silenceToleranceMs,
@@ -107,8 +110,9 @@ test('reviveSnapshot upgrades a legacy v1 snapshot without losing closures', () 
     v: 1,
   };
   const revived = reviveSnapshot(legacy);
-  assert.equal(revived.v, 2);
+  assert.equal(revived.v, 3);
   assert.equal(revived.chapterId, 'first_light'); // unknown chapter → safe start
+  assert.equal(revived.phase, 'walk'); // legacy session never replays the intro
   assert.equal(revived.closedScopes.length, 1);
   assert.ok(revived.closedScopes[0]!.matchTokens.includes('divorce'));
   assert.equal(revived.carry.name, 'Eleanor');
@@ -120,4 +124,45 @@ test('pre-prompt gate: closed scopes match on tokens, not fuzz', () => {
   assert.ok(touchesClosedScope(snap, 'Tell me about the divorce settlement'));
   assert.ok(touchesClosedScope(snap, 'what happened with the divorces'), 'plural folds');
   assert.equal(touchesClosedScope(snap, 'Tell me about your wedding day'), null);
+});
+
+
+test('new sessions begin in the intro phase with no name', () => {
+  const snap = initialStateSnapshot();
+  assert.equal(snap.phase, 'intro');
+  assert.equal(isIntro(snap), true);
+  assert.equal(snap.subscriberName, null);
+  assert.equal(snap.chapterId, 'first_light');
+});
+
+test('applyIntroComplete records the name and enters the walk at First Light', () => {
+  const snap = initialStateSnapshot();
+  const next = applyIntroComplete(snap, { kind: 'intro_complete', name: '  Eleanor  ' });
+  assert.equal(next.phase, 'walk');
+  assert.equal(isIntro(next), false);
+  assert.equal(next.subscriberName, 'Eleanor'); // trimmed
+  assert.equal(next.chapterId, 'first_light');
+});
+
+test('jumpToChapter moves to any chapter, ends the intro, and preserves closures', () => {
+  let snap = initialStateSnapshot();
+  snap = closeScope(snap, 'stop talking about the divorce');
+  snap = recordConfirmedMoment(snap, 'moment-1'); // confirm a Moment in first_light
+  const before = snap.confirmedMoments.first_light;
+
+  const jumped = jumpToChapter(snap, 'what_stayed');
+  assert.equal(jumped.phase, 'walk');
+  assert.equal(jumped.chapterId, 'what_stayed');
+  assert.equal(jumped.followUpSpent, false);
+  // Reverence + prior progress are untouched by a jump.
+  assert.equal(jumped.closedScopes.length, 1);
+  assert.equal(jumped.confirmedMoments.first_light, before);
+});
+
+test('jumpToChapter rejects an unknown chapter and is a no-op on the current one', () => {
+  const walk = jumpToChapter(initialStateSnapshot(), 'first_light'); // from intro → enters walk
+  assert.equal(walk.phase, 'walk');
+  // @ts-expect-error invalid chapter id is rejected at runtime
+  assert.equal(jumpToChapter(walk, 'not_a_chapter').chapterId, 'first_light');
+  assert.equal(jumpToChapter(walk, 'first_light'), walk); // same chapter in walk → unchanged ref
 });

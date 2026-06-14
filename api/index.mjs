@@ -2,41 +2,6 @@
 import cors from "cors";
 import express from "express";
 
-// server/src/env.ts
-import "dotenv/config";
-function bool(v) {
-  return v === "true" || v === "1" || v === "yes";
-}
-var FIRST_THREAD_VOICE = bool(process.env.FIRST_THREAD_VOICE);
-var PORT = Number(process.env.PORT ?? 8787);
-var CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "claude-opus-4-8";
-var REQUIRED_WHEN_ENABLED = [
-  "HUME_API_KEY",
-  "HUME_SECRET_KEY",
-  "HUME_CONFIG_ID",
-  "ANTHROPIC_API_KEY",
-  "SUPABASE_URL",
-  "SUPABASE_SERVICE_ROLE_KEY",
-  "OWNER_SUBSCRIBER_ID"
-];
-function requireSecrets() {
-  const missing = REQUIRED_WHEN_ENABLED.filter((k) => !process.env[k] || process.env[k].trim() === "");
-  if (missing.length > 0) {
-    throw new Error(
-      `first_thread_voice is enabled but required environment variables are missing: ${missing.join(", ")}. Set them (see .env.example) \u2014 secrets are never hardcoded.`
-    );
-  }
-  return {
-    HUME_API_KEY: process.env.HUME_API_KEY,
-    HUME_SECRET_KEY: process.env.HUME_SECRET_KEY,
-    HUME_CONFIG_ID: process.env.HUME_CONFIG_ID,
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-    SUPABASE_URL: process.env.SUPABASE_URL,
-    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
-    OWNER_SUBSCRIBER_ID: process.env.OWNER_SUBSCRIBER_ID
-  };
-}
-
 // packages/shared/src/reverenceFilter.ts
 var CLOSED_DOOR_PHRASES = [
   "i don't want to talk about",
@@ -369,7 +334,9 @@ function initialStateSnapshot() {
     pendingPhoto: null,
     activeMomentId: null,
     confirmedMoments: {},
-    v: 2
+    phase: "intro",
+    subscriberName: null,
+    v: 3
   };
 }
 var SETH_VOICE_AND_GUARDRAILS = `You are Seth, a warm, unhurried, historically literate First Thread Companion.
@@ -390,8 +357,27 @@ Non-negotiable rules:
 - CONFIRM BEFORE COMMIT: before a Moment is placed on the River, reflect it back in one sentence \u2014 "Here's what I'm placing on your River from this \u2014 does this feel right?" \u2014 and wait for their yes.
 - NEVER-SAY words (user-facing copy): "Unlock", "Seamlessly", "AI-powered", "Dive into", "Your journey". Avoid them entirely.
 - Keep turns short and spoken-natural. You are being heard aloud, not read.`;
+function buildSethIntroPrompt(ctx) {
+  const haveName = Boolean(ctx.subscriberName);
+  const nameStep = haveName ? `You already know their name is ${ctx.subscriberName}. Do not ask again \u2014 greet them by it once, warmly.` : `You do not yet know their name. After your short introduction, ask for it simply: "Before we start \u2014 what should I call you?" Wait for their answer. If they only greet you or say something else first, respond warmly, then ask for their name once.`;
+  return `${SETH_VOICE_AND_GUARDRAILS}
+
+You are at the very BEGINNING of the walk \u2014 the Introduction, before the first chapter.
+This turn (and the next one or two) is NOT First Light yet. Your job in the introduction, in your own warm spoken words, is to:
+  1. Introduce yourself briefly: you are Seth, a companion who will walk with them through their life story, one memory at a time.
+  2. Set expectations gently: it's an unhurried conversation in seven short chapters, from earliest childhood to the present; you'll ask one thing at a time; there are no wrong answers, and anything they'd rather not touch, you'll simply leave be.
+  3. Reassure them they can stop whenever they like and pick the conversation back up later, right where it left off \u2014 nothing is lost.
+  4. ${nameStep}
+
+Keep it short and human \u2014 a few spoken sentences, not a speech. ONE question per turn (the name is your question this turn). Do not list the chapters like a menu; describe the shape of it warmly.
+
+When \u2014 and only when \u2014 you have their name and they seem ready, call the record_first_thread_payload tool with kind:"intro_complete" and their name, then in the SAME turn speak a brief, warm hand-off into the first chapter using First Light's opening: "Think about the house you spent your earliest years in \u2014 not the front of it, the inside. Where in that house did you feel most at home?" Never say the word "chapter" aloud, never mention the tool, and never narrate that you're saving anything.`;
+}
 function buildSethSystemPrompt(ctx) {
   const chapter = getChapter(ctx.chapterId);
+  const nameLine = ctx.subscriberName ? `
+
+The person's name is ${ctx.subscriberName}. Use it sparingly and warmly \u2014 a name lands hardest when it's rare, not in every line.` : "";
   const closed = ctx.closedScopes.length > 0 ? `
 
 CLOSED DOORS \u2014 these are closed permanently; never re-approach, reference, or use as context. Skip any branch of the script that touches them:
@@ -415,7 +401,7 @@ A PHOTOGRAPH was just added to the Moment you're discussing${ctx.pendingPhoto.wh
 This chapter has a confirmed Moment. When it feels complete, emit chapter_complete via the tool (with a carryDetail) and speak the transition into the next chapter, carrying: ${chapter.transitionCarry}.` : `
 
 A chapter is complete when at least one Moment is confirmed \u2014 never forced. Chapter aim: ${chapter.milestoneTargets.join(" \xB7 ")}.`;
-  return `${SETH_VOICE_AND_GUARDRAILS}
+  return `${SETH_VOICE_AND_GUARDRAILS}${nameLine}
 
 Current chapter: ${chapter.title} (${chapter.era} \xB7 ${chapter.session === "core" ? "Core Session" : "Depth Session"}).
 Chapter opening (use this wording when opening the chapter): "${chapter.openingPrompt}"
@@ -449,7 +435,11 @@ function reviveSnapshot(raw) {
     pendingDraft: o.pendingDraft ?? null,
     pendingPhoto: o.pendingPhoto ?? null,
     activeMomentId: typeof o.activeMomentId === "string" ? o.activeMomentId : null,
-    confirmedMoments: o.confirmedMoments && typeof o.confirmedMoments === "object" ? o.confirmedMoments : {}
+    confirmedMoments: o.confirmedMoments && typeof o.confirmedMoments === "object" ? o.confirmedMoments : {},
+    // Legacy (pre-intro) snapshots revive straight into the walk — never replay
+    // the introduction for a session that was already mid-conversation.
+    phase: o.phase === "intro" || o.phase === "walk" ? o.phase : "walk",
+    subscriberName: typeof o.subscriberName === "string" ? o.subscriberName : null
   };
 }
 function nextTurn(snapshot) {
@@ -469,6 +459,27 @@ function advanceChapter(snapshot) {
   const idx = CHAPTER_ORDER.indexOf(snapshot.chapterId);
   const next = CHAPTER_ORDER[idx + 1];
   return { ...snapshot, chapterId: next, followUpSpent: false };
+}
+function applyIntroComplete(snapshot, payload) {
+  const name = payload.name?.trim();
+  return {
+    ...snapshot,
+    phase: "walk",
+    subscriberName: name ? name : snapshot.subscriberName,
+    chapterId: snapshot.phase === "intro" ? CHAPTER_ORDER[0] : snapshot.chapterId,
+    followUpSpent: false
+  };
+}
+function jumpToChapter(snapshot, target) {
+  if (!CHAPTER_ORDER.includes(target)) return snapshot;
+  if (snapshot.phase === "walk" && target === snapshot.chapterId) return snapshot;
+  return {
+    ...snapshot,
+    phase: "walk",
+    chapterId: target,
+    followUpSpent: false,
+    pendingDraft: null
+  };
 }
 function applyChapterComplete(snapshot, payload) {
   if (payload.chapterId !== snapshot.chapterId) return snapshot;
@@ -527,6 +538,41 @@ function detectConfirmation(utterance) {
   return "unclear";
 }
 
+// server/src/env.ts
+import "dotenv/config";
+function bool(v) {
+  return v === "true" || v === "1" || v === "yes";
+}
+var FIRST_THREAD_VOICE = bool(process.env.FIRST_THREAD_VOICE);
+var PORT = Number(process.env.PORT ?? 8787);
+var CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? "claude-opus-4-8";
+var REQUIRED_WHEN_ENABLED = [
+  "HUME_API_KEY",
+  "HUME_SECRET_KEY",
+  "HUME_CONFIG_ID",
+  "ANTHROPIC_API_KEY",
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "OWNER_SUBSCRIBER_ID"
+];
+function requireSecrets() {
+  const missing = REQUIRED_WHEN_ENABLED.filter((k) => !process.env[k] || process.env[k].trim() === "");
+  if (missing.length > 0) {
+    throw new Error(
+      `first_thread_voice is enabled but required environment variables are missing: ${missing.join(", ")}. Set them (see .env.example) \u2014 secrets are never hardcoded.`
+    );
+  }
+  return {
+    HUME_API_KEY: process.env.HUME_API_KEY,
+    HUME_SECRET_KEY: process.env.HUME_SECRET_KEY,
+    HUME_CONFIG_ID: process.env.HUME_CONFIG_ID,
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+    SUPABASE_URL: process.env.SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    OWNER_SUBSCRIBER_ID: process.env.OWNER_SUBSCRIBER_ID
+  };
+}
+
 // server/src/claude.ts
 import Anthropic from "@anthropic-ai/sdk";
 var anthropic = null;
@@ -544,7 +590,7 @@ var RECORD_PAYLOAD_TOOL = {
     properties: {
       kind: {
         type: "string",
-        enum: ["moment_draft", "story_draft", "closed_topic_event", "chapter_complete"]
+        enum: ["moment_draft", "story_draft", "closed_topic_event", "chapter_complete", "intro_complete"]
       },
       title: { type: "string", description: "Short title (moment_draft / story_draft)." },
       summary: { type: "string", description: "Grounded summary (moment_draft)." },
@@ -564,6 +610,10 @@ var RECORD_PAYLOAD_TOOL = {
       carryDetail: {
         type: "string",
         description: "chapter_complete: one concrete detail to carry into the next chapter."
+      },
+      name: {
+        type: "string",
+        description: "intro_complete: the subscriber's name as they gave it."
       }
     },
     required: ["kind"]
@@ -625,6 +675,9 @@ function coercePayload(input, chapterId) {
   }
   if (kind === "closed_topic_event" && typeof o.phrase === "string") {
     return { kind, phrase: o.phrase, source: "claude", chapterId };
+  }
+  if (kind === "intro_complete" && typeof o.name === "string" && o.name.trim() !== "") {
+    return { kind, name: o.name.trim() };
   }
   return null;
 }
@@ -881,6 +934,42 @@ async function handleClmRequest(req, res) {
     sseDone(res);
     return;
   }
+  if (snapshot.phase === "intro") {
+    const introPrompt = buildSethIntroPrompt({ subscriberName: snapshot.subscriberName });
+    try {
+      const result = await generateSethTurn({
+        systemPrompt: introPrompt,
+        history: messages,
+        chapterId: snapshot.chapterId,
+        onText: (delta) => sseChunk(res, delta),
+        signal: abort.signal
+      });
+      if (result.payload?.kind === "intro_complete") {
+        snapshot = applyIntroComplete(snapshot, result.payload);
+        if (sessionId && subscriberId) {
+          await safe(
+            () => appendExchange({
+              sessionId,
+              role: "system",
+              content: `[intro] name captured \u2192 "${snapshot.subscriberName ?? ""}"; entering ${snapshot.chapterId}`
+            })
+          );
+        }
+      }
+      if (sessionId) await safe(() => updateSession(sessionId, { snapshot }));
+      sseDone(res);
+    } catch (err) {
+      if (abort.signal.aborted) {
+        if (sessionId) await safe(() => updateSession(sessionId, { snapshot }));
+        res.end();
+        return;
+      }
+      console.error("[clm] intro generation error:", err);
+      sseChunk(res, "I'm sorry \u2014 I lost my thread for a moment. Could you say that once more?");
+      sseDone(res);
+    }
+    return;
+  }
   if (snapshot.pendingDraft && subscriberId && sessionId) {
     const verdict = detectConfirmation(utterance);
     if (verdict === "confirm") {
@@ -918,6 +1007,7 @@ async function handleClmRequest(req, res) {
   }
   const systemPrompt = buildSethSystemPrompt({
     chapterId: snapshot.chapterId,
+    subscriberName: snapshot.subscriberName,
     followUpSpent: snapshot.followUpSpent,
     closedScopes: snapshot.closedScopes,
     carry: snapshot.carry,
@@ -1113,6 +1203,31 @@ app.get("/api/sessions/:id/state", requireFlag, async (req, res) => {
   } catch (err) {
     console.error("[sessions:state]", err);
     res.status(500).json({ error: "failed to load session state" });
+  }
+});
+app.post("/api/sessions/:id/chapter", requireFlag, async (req, res) => {
+  const id = req.params.id;
+  const chapterId = req.body?.chapterId;
+  if (!id) {
+    res.status(400).json({ error: "session id required" });
+    return;
+  }
+  if (!chapterId || !CHAPTER_ORDER.includes(chapterId)) {
+    res.status(400).json({ error: "valid chapterId required" });
+    return;
+  }
+  try {
+    const session = await getSession(id);
+    if (!session) {
+      res.status(404).json({ error: "session not found" });
+      return;
+    }
+    const snapshot = jumpToChapter(session.snapshot, chapterId);
+    await updateSession(id, { snapshot });
+    res.json({ snapshot });
+  } catch (err) {
+    console.error("[sessions:chapter]", err);
+    res.status(500).json({ error: "failed to set chapter" });
   }
 });
 app.post("/api/photos", requireFlag, handlePhotoUpload);

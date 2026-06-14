@@ -37,6 +37,8 @@ export interface NewExchange {
 /* ── Persistence: rot_capture_sessions ────────────────────────────────────── */
 
 export type SessionStatus = 'in_progress' | 'complete' | 'abandoned';
+/** Arc phase of a First Thread session: spoken intro, then the seven-chapter walk. */
+export type SessionPhase = 'intro' | 'walk';
 export type EntryPoint = 'first_thread';
 export type Companion = 'seth' | 'miriam';
 
@@ -126,8 +128,16 @@ export interface SessionStateSnapshot {
   activeMomentId: string | null;
   /** Count of confirmed Moments per chapter (chapter completeness rule). */
   confirmedMoments: Partial<Record<ChapterId, number>>;
+  /**
+   * Where the session is in its arc. `intro` = Seth's spoken introduction +
+   * name capture (runs once, before First Light); `walk` = the seven-chapter
+   * walk. New sessions start in `intro`; legacy snapshots revive as `walk`.
+   */
+  phase: SessionPhase;
+  /** The subscriber's spoken name, captured in the intro (null until given). */
+  subscriberName: string | null;
   /** Schema version for the snapshot shape itself. */
-  v: 2;
+  v: 3;
 }
 
 /* ── Two-channel structured output (the River-write boundary) ──────────────── */
@@ -142,7 +152,8 @@ export type FirstThreadPayload =
   | MomentDraftPayload
   | StoryDraftPayload
   | ClosedTopicEventPayload
-  | ChapterCompletePayload;
+  | ChapterCompletePayload
+  | IntroCompletePayload;
 
 export interface MomentDraftPayload {
   kind: 'moment_draft';
@@ -175,6 +186,17 @@ export interface ClosedTopicEventPayload {
   phrase: string;
   source: 'reverence_prefilter' | 'claude';
   chapterId: ChapterId;
+}
+
+/**
+ * Emitted once, during the intro phase, when Seth has the subscriber's name and
+ * is ready to begin First Light. The engine stores the name and flips the
+ * session from `intro` to `walk`.
+ */
+export interface IntroCompletePayload {
+  kind: 'intro_complete';
+  /** The subscriber's name as they gave it (used warmly through the walk). */
+  name: string;
 }
 
 /**

@@ -25,7 +25,9 @@ import type { Request, Response } from 'express';
 import {
   REVERENCE_ACKNOWLEDGMENT,
   buildSethSystemPrompt,
+  buildSethIntroPrompt,
   applyChapterComplete,
+  applyIntroComplete,
   clearDraft,
   clearPhoto,
   closeScope,
@@ -124,6 +126,46 @@ export async function handleClmRequest(req: Request, res: Response): Promise<voi
     return;
   }
 
+  // ── 2.5 Intro phase: Seth's spoken introduction + name capture ──────────
+  // Runs once before First Light. No drafts, no chapter logic — Seth introduces
+  // himself, frames the walk, reassures about pause/resume, and learns the name.
+  if (snapshot.phase === 'intro') {
+    const introPrompt = buildSethIntroPrompt({ subscriberName: snapshot.subscriberName });
+    try {
+      const result = await generateSethTurn({
+        systemPrompt: introPrompt,
+        history: messages,
+        chapterId: snapshot.chapterId,
+        onText: (delta) => sseChunk(res, delta),
+        signal: abort.signal,
+      });
+      if (result.payload?.kind === 'intro_complete') {
+        snapshot = applyIntroComplete(snapshot, result.payload);
+        if (sessionId && subscriberId) {
+          await safe(() =>
+            appendExchange({
+              sessionId,
+              role: 'system',
+              content: `[intro] name captured \u2192 "${snapshot.subscriberName ?? ''}"; entering ${snapshot.chapterId}`,
+            }),
+          );
+        }
+      }
+      if (sessionId) await safe(() => updateSession(sessionId, { snapshot }));
+      sseDone(res);
+    } catch (err) {
+      if (abort.signal.aborted) {
+        if (sessionId) await safe(() => updateSession(sessionId, { snapshot }));
+        res.end();
+        return;
+      }
+      console.error('[clm] intro generation error:', err);
+      sseChunk(res, "I'm sorry \u2014 I lost my thread for a moment. Could you say that once more?");
+      sseDone(res);
+    }
+    return;
+  }
+
   // ── 3. Pending-draft confirmation (the ONLY path to a River write) ───────
   if (snapshot.pendingDraft && subscriberId && sessionId) {
     const verdict = detectConfirmation(utterance);
@@ -169,6 +211,7 @@ export async function handleClmRequest(req: Request, res: Response): Promise<voi
   // ── 4. Claude speaks Seth's turn (scaffold-built prompt only) ────────────
   const systemPrompt = buildSethSystemPrompt({
     chapterId: snapshot.chapterId,
+    subscriberName: snapshot.subscriberName,
     followUpSpent: snapshot.followUpSpent,
     closedScopes: snapshot.closedScopes,
     carry: snapshot.carry,

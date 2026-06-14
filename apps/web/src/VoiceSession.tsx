@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { VoiceProvider, useVoice } from '@humeai/voice-react';
 import type { SessionStateSnapshot } from '@throughline/shared';
-import { createSession, fetchHumeToken, fetchResumable, fetchSessionState, setSessionStatus } from './api';
+import { CHAPTER_ORDER } from '@throughline/shared';
+import { createSession, fetchHumeToken, fetchResumable, fetchSessionState, setChapter, setSessionStatus } from './api';
 import { useTranscriptPersistence } from './useTranscriptPersistence';
 import { PhotoCapture } from './PhotoCapture';
 
@@ -129,6 +130,22 @@ function SethPanel({
     }
   }, [sessionId]);
 
+  const [jumping, setJumping] = useState(false);
+  const jumpTo = useCallback(
+    async (chapterId: string) => {
+      setJumping(true);
+      try {
+        const { snapshot: fresh } = await setChapter(sessionId, chapterId);
+        setSnapshot(fresh);
+      } catch (e) {
+        console.error('chapter jump failed', e);
+      } finally {
+        setJumping(false);
+      }
+    },
+    [sessionId],
+  );
+
   // The flow state lives server-side; poll lightly while connected so the
   // chapter marker and photo affordance track the conversation.
   useEffect(() => {
@@ -167,10 +184,13 @@ function SethPanel({
   );
 
   return (
-    <section className="ft-card ft-session">
+    <div className="ft-session-layout">
+      <section className="ft-card ft-session">
       <div className="ft-session__bar">
         <span className="ft-chapter">
-          Chapter · {CHAPTER_LABELS[snapshot.chapterId] ?? snapshot.chapterId}
+          {snapshot.phase === 'intro'
+            ? 'Introduction'
+            : `Chapter · ${CHAPTER_LABELS[snapshot.chapterId] ?? snapshot.chapterId}`}
         </span>
         <span className={`ft-status ft-status--${status.value}`}>{status.value}</span>
       </div>
@@ -182,7 +202,8 @@ function SethPanel({
       )}
 
       <p className="ft-seth-intro">
-        Seth is your First Thread Companion. Speak naturally — you can interrupt at any time, and if
+        When you begin, Seth will introduce himself and walk you through how this works. Speak
+        naturally — you can pause and pick up later anytime, interrupt whenever you like, and if
         there’s anything you’d rather not talk about, just say so and we’ll leave it there.
       </p>
 
@@ -225,6 +246,47 @@ function SethPanel({
           <li className="ft-line ft-line--empty">Your conversation will appear here.</li>
         )}
       </ol>
-    </section>
+      </section>
+
+      <aside className="ft-rail" aria-label="Your story">
+        <h2 className="ft-rail__title">
+          {snapshot.subscriberName ? `${snapshot.subscriberName}\u2019s story` : 'Your story'}
+        </h2>
+        <ol className="ft-rail__list">
+          <li
+            className={`ft-rail__item ft-rail__item--intro ${
+              snapshot.phase === 'intro' ? 'is-current' : 'is-done'
+            }`}
+          >
+            <span className="ft-rail__dot" aria-hidden="true" />
+            <span className="ft-rail__label">Introduction</span>
+          </li>
+          {CHAPTER_ORDER.map((id, i) => {
+            const isCurrent = snapshot.phase === 'walk' && snapshot.chapterId === id;
+            const done = (snapshot.confirmedMoments?.[id] ?? 0) > 0;
+            return (
+              <li
+                key={id}
+                className={`ft-rail__item ${isCurrent ? 'is-current' : ''} ${done ? 'is-done' : ''}`}
+              >
+                <button
+                  className="ft-rail__btn"
+                  onClick={() => void jumpTo(id)}
+                  disabled={jumping}
+                  aria-current={isCurrent ? 'step' : undefined}
+                >
+                  <span className="ft-rail__dot" aria-hidden="true" />
+                  <span className="ft-rail__num">{i + 1}</span>
+                  <span className="ft-rail__label">{CHAPTER_LABELS[id]}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+        <p className="ft-rail__hint">
+          Jump to any chapter whenever you like — your place is saved, and closed doors stay closed.
+        </p>
+      </aside>
+    </div>
   );
 }

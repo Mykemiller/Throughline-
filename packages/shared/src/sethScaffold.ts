@@ -215,7 +215,9 @@ export function initialStateSnapshot(): SessionStateSnapshot {
     pendingPhoto: null,
     activeMomentId: null,
     confirmedMoments: {},
-    v: 2,
+    phase: 'intro',
+    subscriberName: null,
+    v: 3,
   };
 }
 
@@ -243,6 +245,8 @@ Non-negotiable rules:
 
 export interface BuildPromptContext {
   chapterId: ChapterId;
+  /** The subscriber's name (captured in the intro), woven in warmly when present. */
+  subscriberName?: string | null;
   followUpSpent: boolean;
   closedScopes: ClosedScope[];
   carry: Record<string, string>;
@@ -252,11 +256,41 @@ export interface BuildPromptContext {
 }
 
 /**
+ * The intro-phase system prompt: Seth introduces himself, frames the walk
+ * (warmly, no menu language), reassures about pausing/resuming, and asks the
+ * person's name. When he has the name, he emits intro_complete on the tool
+ * channel and flows into First Light — never narrating the mechanics.
+ */
+export function buildSethIntroPrompt(ctx: { subscriberName?: string | null }): string {
+  const haveName = Boolean(ctx.subscriberName);
+  const nameStep = haveName
+    ? `You already know their name is ${ctx.subscriberName}. Do not ask again — greet them by it once, warmly.`
+    : `You do not yet know their name. After your short introduction, ask for it simply: "Before we start — what should I call you?" Wait for their answer. If they only greet you or say something else first, respond warmly, then ask for their name once.`;
+
+  return `${SETH_VOICE_AND_GUARDRAILS}
+
+You are at the very BEGINNING of the walk — the Introduction, before the first chapter.
+This turn (and the next one or two) is NOT First Light yet. Your job in the introduction, in your own warm spoken words, is to:
+  1. Introduce yourself briefly: you are Seth, a companion who will walk with them through their life story, one memory at a time.
+  2. Set expectations gently: it's an unhurried conversation in seven short chapters, from earliest childhood to the present; you'll ask one thing at a time; there are no wrong answers, and anything they'd rather not touch, you'll simply leave be.
+  3. Reassure them they can stop whenever they like and pick the conversation back up later, right where it left off — nothing is lost.
+  4. ${nameStep}
+
+Keep it short and human — a few spoken sentences, not a speech. ONE question per turn (the name is your question this turn). Do not list the chapters like a menu; describe the shape of it warmly.
+
+When — and only when — you have their name and they seem ready, call the record_first_thread_payload tool with kind:"intro_complete" and their name, then in the SAME turn speak a brief, warm hand-off into the first chapter using First Light's opening: "Think about the house you spent your earliest years in — not the front of it, the inside. Where in that house did you feel most at home?" Never say the word "chapter" aloud, never mention the tool, and never narrate that you're saving anything.`;
+}
+
+/**
  * Compose the system prompt for the current turn from the scaffold + live
  * state. The runtime calls this; it does not assemble prompt content itself.
  */
 export function buildSethSystemPrompt(ctx: BuildPromptContext): string {
   const chapter = getChapter(ctx.chapterId);
+
+  const nameLine = ctx.subscriberName
+    ? `\n\nThe person's name is ${ctx.subscriberName}. Use it sparingly and warmly — a name lands hardest when it's rare, not in every line.`
+    : '';
 
   const closed =
     ctx.closedScopes.length > 0
@@ -289,7 +323,7 @@ export function buildSethSystemPrompt(ctx: BuildPromptContext): string {
       ? `\n\nThis chapter has a confirmed Moment. When it feels complete, emit chapter_complete via the tool (with a carryDetail) and speak the transition into the next chapter, carrying: ${chapter.transitionCarry}.`
       : `\n\nA chapter is complete when at least one Moment is confirmed — never forced. Chapter aim: ${chapter.milestoneTargets.join(' · ')}.`;
 
-  return `${SETH_VOICE_AND_GUARDRAILS}
+  return `${SETH_VOICE_AND_GUARDRAILS}${nameLine}
 
 Current chapter: ${chapter.title} (${chapter.era} · ${chapter.session === 'core' ? 'Core Session' : 'Depth Session'}).
 Chapter opening (use this wording when opening the chapter): "${chapter.openingPrompt}"
