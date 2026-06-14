@@ -2,12 +2,19 @@
  * Mid-interview photo capture (E13-05/06). Take or choose a photograph; EXIF
  * is parsed AND stripped on-device (see exif.ts); only the clean derivative
  * (plus validated text metadata) is uploaded — the original only on explicit
- * retain opt-in. On success the photo is pinned to the active Moment and Seth
- * invites spoken commentary on his next turn.
+ * retain opt-in. The photo pins to the active Moment and Seth invites spoken
+ * commentary on his next turn.
+ *
+ * The picker is always available while connected: you can choose a photo at any
+ * time. A photo can only be *pinned* to a Moment, so if none is confirmed yet
+ * we hold the prepared photo and attach it automatically the moment one is
+ * placed on the River — the button is never a dead end.
  */
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { uploadPhoto } from './api';
 import { blobToBase64, parseExif, stripExif } from './exif';
+
+type PreparedPhoto = Parameters<typeof uploadPhoto>[0];
 
 export function PhotoCapture({
   sessionId,
@@ -22,6 +29,36 @@ export function PhotoCapture({
   const [busy, setBusy] = useState(false);
   const [retainOriginal, setRetainOriginal] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // A prepared (EXIF-stripped) photo waiting for a Moment to pin to.
+  const [pending, setPending] = useState<PreparedPhoto | null>(null);
+  const uploadingRef = useRef(false);
+
+  const doUpload = useCallback(
+    async (payload: PreparedPhoto) => {
+      if (uploadingRef.current) return;
+      uploadingRef.current = true;
+      setBusy(true);
+      try {
+        await uploadPhoto(payload);
+        setPending(null);
+        setNote('Photograph placed with this Moment — tell Seth about it.');
+        onPinned();
+      } catch (e) {
+        setNote(`Couldn’t add the photograph: ${(e as Error).message}`);
+      } finally {
+        setBusy(false);
+        uploadingRef.current = false;
+      }
+    },
+    [onPinned],
+  );
+
+  // When a Moment becomes available, attach any photo that was waiting.
+  useEffect(() => {
+    if (pending && hasActiveMoment && !uploadingRef.current) {
+      void doUpload(pending);
+    }
+  }, [pending, hasActiveMoment, doUpload]);
 
   const onFile = async (file: File | undefined) => {
     if (!file || busy) return;
@@ -31,7 +68,7 @@ export function PhotoCapture({
       const bytes = await file.arrayBuffer();
       const exif = parseExif(bytes);
       const stripped = await stripExif(file);
-      const payload: Parameters<typeof uploadPhoto>[0] = {
+      const payload: PreparedPhoto = {
         sessionId,
         strippedBase64: await blobToBase64(stripped),
         retainOriginal,
@@ -39,16 +76,29 @@ export function PhotoCapture({
         whereText: exif.whereText,
       };
       if (retainOriginal) payload.originalBase64 = await blobToBase64(file);
-      await uploadPhoto(payload);
-      setNote('Photograph placed with this Moment — tell Seth about it.');
-      onPinned();
+
+      if (hasActiveMoment) {
+        await doUpload(payload);
+      } else {
+        // No Moment yet — hold it; the effect attaches it once one is placed.
+        setPending(payload);
+        setNote('Photograph ready — it will attach as soon as you and Seth place a Moment.');
+      }
     } catch (e) {
-      setNote(`Couldn’t add the photograph: ${(e as Error).message}`);
+      setNote(`Couldn’t prepare the photograph: ${(e as Error).message}`);
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = '';
     }
   };
+
+  const label = busy
+    ? pending
+      ? 'Placing…'
+      : 'Preparing…'
+    : pending
+      ? 'Photograph ready'
+      : 'Add a photograph';
 
   return (
     <div className="ft-photo">
@@ -56,17 +106,17 @@ export function PhotoCapture({
         ref={inputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         hidden
         onChange={(e) => void onFile(e.target.files?.[0])}
       />
       <button
         className="ft-btn"
-        disabled={busy || !hasActiveMoment}
-        title={hasActiveMoment ? 'Add a photograph to this Moment' : 'Confirm a Moment with Seth first'}
+        type="button"
+        disabled={busy}
+        title="Choose or take a photograph"
         onClick={() => inputRef.current?.click()}
       >
-        {busy ? 'Adding…' : 'Add a photograph'}
+        {label}
       </button>
       <label className="ft-photo__retain">
         <input
@@ -76,6 +126,11 @@ export function PhotoCapture({
         />
         Keep my original file too
       </label>
+      {!hasActiveMoment && !pending && !note && (
+        <p className="ft-photo__note">
+          You can add a photograph anytime — it attaches to a Moment once you’ve placed one with Seth.
+        </p>
+      )}
       {note && <p className="ft-photo__note">{note}</p>}
     </div>
   );
