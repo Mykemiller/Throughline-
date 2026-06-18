@@ -48,11 +48,13 @@ import {
   confirmedInChapter,
   detectClosedDoor,
   detectConfirmation,
+  extractNamedIdentities,
   hitPhotoSoftCap,
   initialStateSnapshot,
   isOperationalReturn,
   markActivity,
   nextTurn,
+  recordNamedIdentities,
   resetPhotosSinceRecap,
   setActiveMoment,
   spendFollowUp,
@@ -344,6 +346,10 @@ export async function handleClmRequest(req: Request, res: Response): Promise<voi
     }
   }
 
+  // Capture any subscriber-supplied names this turn for intra-session reuse (D).
+  // Deterministic + high-precision; Seth still never invents an identity.
+  snapshot = recordNamedIdentities(snapshot, extractNamedIdentities(utterance), snapshot.turn);
+
   // ── 6. Claude speaks Seth's turn ──────────────────────────────────────────
   const systemPrompt = buildSethSystemPrompt({
     chapterId: snapshot.chapterId,
@@ -355,6 +361,7 @@ export async function handleClmRequest(req: Request, res: Response): Promise<voi
     pendingPhoto: snapshot.pendingPhoto,
     queuedPhotoCount: snapshot.photoQueue.length,
     operationalReturn,
+    namedIdentities: snapshot.namedIdentities,
     confirmedInChapter: confirmedInChapter(snapshot),
     recapPending: snapshot.recapPending,
   });

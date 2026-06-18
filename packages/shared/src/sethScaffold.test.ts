@@ -148,6 +148,28 @@ test('no operationalReturn → no re-entry directive', () => {
   assert.ok(!p.includes('resumed after a long pause'));
 });
 
+test('known named identities are surfaced into the photo identity guidance', () => {
+  const p = buildSethSystemPrompt(
+    baseCtx({
+      pendingPhoto: photo({ description: 'a man by a car', isLikelyPhoto: true, visionConfidence: 'high' }),
+      namedIdentities: [
+        { name: 'Arthur', firstSeenTurn: 2 },
+        { name: 'Mae', firstSeenTurn: 4 },
+      ],
+    }),
+  );
+  assert.match(p, /already given you this session/);
+  assert.match(p, /Arthur, Mae/);
+  assert.match(p, /never a name not on this list/);
+});
+
+test('no named identities → no known-names list', () => {
+  const p = buildSethSystemPrompt(
+    baseCtx({ pendingPhoto: photo({ description: 'a man by a car', isLikelyPhoto: true, visionConfidence: 'high' }) }),
+  );
+  assert.ok(!p.includes('already given you this session'));
+});
+
 test('reverence preamble distinguishes operational timeout from emotional decline', () => {
   const p = buildSethSystemPrompt(baseCtx());
   assert.match(p, /Operational silence is NOT an emotional decline/);

@@ -23,6 +23,7 @@ import type {
   CareerArcAct,
   ChapterId,
   ClosedScope,
+  NamedIdentity,
   NuclearEpisode,
   PendingDraft,
   PendingPhoto,
@@ -270,6 +271,8 @@ export interface BuildPromptContext {
   pendingPhoto: PendingPhoto | null;
   /** Photos waiting behind the in-focus one (batch intake, item A). */
   queuedPhotoCount?: number;
+  /** Names the subscriber has supplied this session, for gentle reuse (item D). */
+  namedIdentities?: NamedIdentity[];
   /**
    * The session just resumed after a long inactivity gap (item B) — an
    * operational timeout, NOT a closed door. Seth opens with a gentle re-entry
@@ -361,6 +364,14 @@ export function buildSethSystemPrompt(ctx: BuildPromptContext): string {
     ctx.pendingPhoto != null &&
     (ctx.pendingPhoto.isLikelyPhoto === false || ctx.pendingPhoto.visionConfidence === 'low');
 
+  // Names the subscriber has supplied this session — the ONLY names Seth may
+  // gently reuse when a face reappears (item D). Never extend beyond this list.
+  const knownNames = (ctx.namedIdentities ?? []).map((n) => n.name);
+  const knownNamesNote =
+    knownNames.length > 0
+      ? ` Names the person has already given you this session, which you MAY gently reuse (and only these — never a name not on this list): ${knownNames.join(', ')}.`
+      : '';
+
   // Beat 0b — batch intake: more photos arrived together and are waiting behind
   // this one. Acknowledge the handful and take them one at a time.
   const queued = ctx.queuedPhotoCount ?? 0;
@@ -381,7 +392,7 @@ export function buildSethSystemPrompt(ctx: BuildPromptContext): string {
       `  BEAT 1 — ACKNOWLEDGE & DESCRIBE: tell them plainly the picture came through and that you can see it, then note ONLY what is literally visible — light, setting, objects, the feeling of the scene. Propose, never assert ("this looks like it might be…").${photoWhenHint}\n` +
       `  BEAT 2 — ELICIT ONE DETAIL (MANDATORY for every photo): before you move on from THIS picture — to another photo or to closing — ask exactly ONE open-ended question inviting them to elaborate on it ("what was happening here?", "tell me about this one", "what do you see when you look at it now?"). Never a yes/no, never stacked. This open invitation is required for every photo; the only thing that excuses skipping it is a closed-door signal.\n` +
       `Hard limits: NEVER name or identify anyone in the picture, NEVER guess relationships, NEVER invent a backstory or a date. The people and the story are theirs to tell, not yours to supply.\n` +
-      `INTRA-SESSION IDENTITY: the "never name people" rule guards against you INVENTING an identity — it is not amnesia. If earlier in THIS conversation they already named someone ("that's my dad, Arthur"), you may gently reuse that name when the same person plausibly reappears ("is that Arthur again?") — offered as an observation open to correction, never as a hard claim, and never extended to anyone they haven't named themselves.\n` +
+      `INTRA-SESSION IDENTITY: the "never name people" rule guards against you INVENTING an identity — it is not amnesia. If earlier in THIS conversation they already named someone ("that's my dad, Arthur"), you may gently reuse that name when the same person plausibly reappears ("is that Arthur again?") — offered as an observation open to correction, never as a hard claim, and never extended to anyone they haven't named themselves.${knownNamesNote}\n` +
       `BEAT 3 — RECEIVE AMBIENTLY: when they tell you about it, take whatever they give — a story, a single word, or nothing — and let it be enough. Mirror lightly, in their words. Do NOT echo the same way every photo: rotate your move and never repeat it back-to-back — VALIDATE (lightly mirror their words) / SYNTHESIZE (tie this photo to an earlier one from this session) / ACKNOWLEDGE & CLEAR (let a phrase breathe, no echo, then the next question). When something concrete is worth keeping, emit a story_draft via the tool (their words, grounded) — never narrate the save.\n` +
       `If they decline or fall silent in the moment, honor it (Reverence): one gentle acknowledgment, the photo still attaches with no commentary, and you move on without a flicker of pressure.`;
 

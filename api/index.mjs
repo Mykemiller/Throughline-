@@ -408,6 +408,8 @@ You have just gently recapped the Moments you've been holding onto and asked whe
 AWAITING CONFIRMATION: you proposed "${ctx.pendingDraft.payload.title}" for the River. If the person's last turn was a clear yes, you may consider it placed (the app commits it \u2014 do not say "saved", just move on warmly). If they corrected it, re-propose ONCE with the correction via the tool. If they declined, let it go without comment.` : "";
   const photoWhenHint = ctx.pendingPhoto?.whenText ? ` The photo's file metadata suggests a date of "${ctx.pendingPhoto.whenText}"` + (ctx.pendingPhoto.whereText ? ` and a place near "${ctx.pendingPhoto.whereText}"` : "") + `. Treat this as a soft hint only. If the image itself looks like an older print or scan (black-and-white, faded, period clothing, an old border) while that file date is recent, the date almost certainly records when it was DIGITIZED, not when the moment happened \u2014 do NOT propose it as the memory's date; gently note the gap and ask when the moment itself took place. Otherwise you may offer the date as a question ("the file says maybe ${ctx.pendingPhoto.whenText} \u2014 does that land anywhere near the truth?"), never as established fact.` : "";
   const photoUnsure = ctx.pendingPhoto != null && (ctx.pendingPhoto.isLikelyPhoto === false || ctx.pendingPhoto.visionConfidence === "low");
+  const knownNames = (ctx.namedIdentities ?? []).map((n) => n.name);
+  const knownNamesNote = knownNames.length > 0 ? ` Names the person has already given you this session, which you MAY gently reuse (and only these \u2014 never a name not on this list): ${knownNames.join(", ")}.` : "";
   const queued = ctx.queuedPhotoCount ?? 0;
   const batchNote = queued > 0 ? `
 
@@ -422,7 +424,7 @@ A PHOTOGRAPH was just added to the Moment you're discussing, and you can see it 
 `) + `  BEAT 1 \u2014 ACKNOWLEDGE & DESCRIBE: tell them plainly the picture came through and that you can see it, then note ONLY what is literally visible \u2014 light, setting, objects, the feeling of the scene. Propose, never assert ("this looks like it might be\u2026").${photoWhenHint}
   BEAT 2 \u2014 ELICIT ONE DETAIL (MANDATORY for every photo): before you move on from THIS picture \u2014 to another photo or to closing \u2014 ask exactly ONE open-ended question inviting them to elaborate on it ("what was happening here?", "tell me about this one", "what do you see when you look at it now?"). Never a yes/no, never stacked. This open invitation is required for every photo; the only thing that excuses skipping it is a closed-door signal.
 Hard limits: NEVER name or identify anyone in the picture, NEVER guess relationships, NEVER invent a backstory or a date. The people and the story are theirs to tell, not yours to supply.
-INTRA-SESSION IDENTITY: the "never name people" rule guards against you INVENTING an identity \u2014 it is not amnesia. If earlier in THIS conversation they already named someone ("that's my dad, Arthur"), you may gently reuse that name when the same person plausibly reappears ("is that Arthur again?") \u2014 offered as an observation open to correction, never as a hard claim, and never extended to anyone they haven't named themselves.
+INTRA-SESSION IDENTITY: the "never name people" rule guards against you INVENTING an identity \u2014 it is not amnesia. If earlier in THIS conversation they already named someone ("that's my dad, Arthur"), you may gently reuse that name when the same person plausibly reappears ("is that Arthur again?") \u2014 offered as an observation open to correction, never as a hard claim, and never extended to anyone they haven't named themselves.${knownNamesNote}
 BEAT 3 \u2014 RECEIVE AMBIENTLY: when they tell you about it, take whatever they give \u2014 a story, a single word, or nothing \u2014 and let it be enough. Mirror lightly, in their words. Do NOT echo the same way every photo: rotate your move and never repeat it back-to-back \u2014 VALIDATE (lightly mirror their words) / SYNTHESIZE (tie this photo to an earlier one from this session) / ACKNOWLEDGE & CLEAR (let a phrase breathe, no echo, then the next question). When something concrete is worth keeping, emit a story_draft via the tool (their words, grounded) \u2014 never narrate the save.
 If they decline or fall silent in the moment, honor it (Reverence): one gentle acknowledgment, the photo still attaches with no commentary, and you move on without a flicker of pressure.`;
   const completeness = ctx.confirmedInChapter > 0 && ctx.followUpSpent ? `
@@ -588,6 +590,46 @@ function isOperationalReturn(snapshot, nowMs, thresholdMs = IDLE_RETURN_MS) {
   const last = new Date(snapshot.lastActivityAt).getTime();
   if (Number.isNaN(last)) return false;
   return nowMs - last > thresholdMs;
+}
+var RELATIONSHIP = "(?:dad|daddy|father|mom|mum|mommy|mother|brother|sister|son|daughter|husband|wife|aunt|auntie|uncle|grandfather|grandmother|grandpa|grandma|granddad|granny|cousin|friend|neighbour|neighbor|partner|fiance|fiancee|boyfriend|girlfriend)";
+var NAME = "[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)?";
+function extractNamedIdentities(utterance) {
+  if (!utterance) return [];
+  const found = [];
+  const patterns = [
+    // "my dad Arthur" / "my aunt, Mae"
+    new RegExp(`\\bmy\\s+${RELATIONSHIP}\\s*,?\\s+(${NAME})`, "g"),
+    // "Arthur, my dad" / "Mae — my aunt"
+    new RegExp(`\\b(${NAME})\\s*[,\u2014-]\\s*my\\s+${RELATIONSHIP}\\b`, "g"),
+    // "named Arthur" / "called her Mae" / "his name was Arthur" / "her name is Mae"
+    // Case-sensitive so NAME stays capitalized; cue initials handled explicitly,
+    // and an optional pronoun ("called her Mae") may sit between cue and name.
+    new RegExp(`\\b(?:[Nn]amed|[Cc]alled|[Nn]ame\\s+(?:was|is|'s))\\s+(?:her|him|them)?\\s*(${NAME})`, "g")
+  ];
+  for (const re of patterns) {
+    let m;
+    while ((m = re.exec(utterance)) !== null) {
+      const name = m[1]?.trim();
+      if (name) found.push(name);
+    }
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const unique = [];
+  for (const n of found) {
+    const key = n.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(n);
+    }
+  }
+  return unique;
+}
+function recordNamedIdentities(snapshot, names, turn) {
+  if (names.length === 0) return snapshot;
+  const known = new Set(snapshot.namedIdentities.map((n) => n.name.toLowerCase()));
+  const additions = names.filter((n) => !known.has(n.toLowerCase())).map((name) => ({ name, firstSeenTurn: turn }));
+  if (additions.length === 0) return snapshot;
+  return { ...snapshot, namedIdentities: [...snapshot.namedIdentities, ...additions] };
 }
 var AFFIRM = /\b(yes|yeah|yep|yes it does|that's right|thats right|that's it|sounds right|feels right|exactly|correct|perfect|it does|put it on|place it|save it|keep it)\b/i;
 var DECLINE = /\b(no|nope|not quite|that's not right|thats not right|don't save|do not save|leave it off|take it off|don't keep|skip it|not that)\b/i;
@@ -1306,6 +1348,7 @@ async function handleClmRequest(req, res) {
       if (softCap) snapshot = resetPhotosSinceRecap(snapshot);
     }
   }
+  snapshot = recordNamedIdentities(snapshot, extractNamedIdentities(utterance), snapshot.turn);
   const systemPrompt = buildSethSystemPrompt({
     chapterId: snapshot.chapterId,
     subscriberName: snapshot.subscriberName,
@@ -1316,6 +1359,7 @@ async function handleClmRequest(req, res) {
     pendingPhoto: snapshot.pendingPhoto,
     queuedPhotoCount: snapshot.photoQueue.length,
     operationalReturn,
+    namedIdentities: snapshot.namedIdentities,
     confirmedInChapter: confirmedInChapter(snapshot),
     recapPending: snapshot.recapPending
   });
