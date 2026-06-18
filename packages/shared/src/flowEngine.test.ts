@@ -110,12 +110,30 @@ test('reviveSnapshot upgrades a legacy v1 snapshot without losing closures', () 
     v: 1,
   };
   const revived = reviveSnapshot(legacy);
-  assert.equal(revived.v, 4);
+  assert.equal(revived.v, 5);
   assert.equal(revived.chapterId, 'first_light'); // unknown chapter → safe start
   assert.equal(revived.phase, 'walk'); // legacy session never replays the intro
   assert.equal(revived.closedScopes.length, 1);
   assert.ok(revived.closedScopes[0]!.matchTokens.includes('divorce'));
   assert.equal(revived.carry.name, 'Eleanor');
+  // v5 photo-series fields default safely when absent from an older snapshot.
+  assert.deepEqual(revived.photoQueue, []);
+  assert.equal(revived.photosSinceRecap, 0);
+  assert.equal(revived.lastActivityAt, null);
+  assert.deepEqual(revived.namedIdentities, []);
+});
+
+test('reviveSnapshot preserves v5 photo-series fields on round-trip', () => {
+  const v5 = {
+    ...initialStateSnapshot(),
+    photosSinceRecap: 3,
+    lastActivityAt: '2026-06-18T17:00:00.000Z',
+    namedIdentities: [{ name: 'Arthur', firstSeenTurn: 4 }],
+  };
+  const revived = reviveSnapshot(v5);
+  assert.equal(revived.photosSinceRecap, 3);
+  assert.equal(revived.lastActivityAt, '2026-06-18T17:00:00.000Z');
+  assert.deepEqual(revived.namedIdentities, [{ name: 'Arthur', firstSeenTurn: 4 }]);
 });
 
 test('pre-prompt gate: closed scopes match on tokens, not fuzz', () => {

@@ -97,6 +97,19 @@ export interface PendingDraft {
   stagedAtTurn: number;
 }
 
+/**
+ * A subscriber-supplied identity, captured deterministically from speech for
+ * intra-session reuse (deferred item D). Seth may reuse a name the subscriber
+ * gave THIS session when a face plausibly reappears — he still never invents or
+ * guesses an identity. `firstSeenTurn` lets the recap reference when it arrived.
+ */
+export interface NamedIdentity {
+  /** The name exactly as the subscriber gave it. */
+  name: string;
+  /** Turn the subscriber first named this person (audit + recap ordering). */
+  firstSeenTurn: number;
+}
+
 /** A photo pinned mid-session, awaiting spoken commentary (E13-05/06). */
 export interface PendingPhoto {
   assetId: string;
@@ -153,8 +166,32 @@ export interface SessionStateSnapshot {
    * session — Seth speaks a brief next-session recap before resuming the walk.
    */
   nextSessionRecapPending: boolean;
+  /* ── Photo-series state (v5; reserved for deferred items A/B/D) ──────────── */
+  /**
+   * (A — batch intake) Photos that arrived together but beyond the one Seth
+   * anchored on. Drained one at a time through the photo beats; the head
+   * becomes the next `pendingPhoto`. Empty when there is no batch in flight.
+   */
+  photoQueue: PendingPhoto[];
+  /**
+   * (B — soft photo cap) Photos seen since the last recap fired. Drives the
+   * ~5-photo soft-cap recap trigger; reset to 0 when a recap fires.
+   */
+  photosSinceRecap: number;
+  /**
+   * (B — idle timeout) ISO timestamp of the last subscriber turn. On return,
+   * `now − lastActivityAt` past the idle threshold marks an operational
+   * timeout (a gentle re-entry nudge), never a closed door. Null until set.
+   */
+  lastActivityAt: string | null;
+  /**
+   * (D — intra-session identity) Names the subscriber has supplied this
+   * session, for gentle reuse when a face reappears. Captured deterministically
+   * from speech; never invented. Empty until the subscriber names someone.
+   */
+  namedIdentities: NamedIdentity[];
   /** Schema version for the snapshot shape itself. */
-  v: 4;
+  v: 5;
 }
 
 /* ── Two-channel structured output (the River-write boundary) ──────────────── */
