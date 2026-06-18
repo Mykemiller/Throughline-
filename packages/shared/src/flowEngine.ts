@@ -32,8 +32,10 @@ import { tokensForTopic } from './reverenceFilter.js';
 /* ── Snapshot hygiene ─────────────────────────────────────────────────────── */
 
 /**
- * Upgrade any persisted snapshot (including legacy v1 shapes) to the current
- * v2 shape without losing closures. Resume must never drop a closed scope.
+ * Upgrade any persisted snapshot (including legacy pre-v5 shapes) to the
+ * current v5 shape without losing closures. Resume must never drop a closed
+ * scope. Fields added in v5 (photoQueue, photosSinceRecap, lastActivityAt,
+ * namedIdentities) default safely when absent from an older snapshot.
  */
 export function reviveSnapshot(raw: unknown): SessionStateSnapshot {
   const fresh = initialStateSnapshot();
@@ -74,6 +76,14 @@ export function reviveSnapshot(raw: unknown): SessionStateSnapshot {
     subscriberName: typeof o.subscriberName === 'string' ? o.subscriberName : null,
     recapPending: Boolean(o.recapPending),
     nextSessionRecapPending: Boolean(o.nextSessionRecapPending),
+    photoQueue: Array.isArray(o.photoQueue)
+      ? (o.photoQueue as SessionStateSnapshot['photoQueue'])
+      : [],
+    photosSinceRecap: typeof o.photosSinceRecap === 'number' ? o.photosSinceRecap : 0,
+    lastActivityAt: typeof o.lastActivityAt === 'string' ? o.lastActivityAt : null,
+    namedIdentities: Array.isArray(o.namedIdentities)
+      ? (o.namedIdentities as SessionStateSnapshot['namedIdentities'])
+      : [],
   };
 }
 

@@ -226,7 +226,11 @@ export function initialStateSnapshot(): SessionStateSnapshot {
     subscriberName: null,
     recapPending: false,
     nextSessionRecapPending: false,
-    v: 4,
+    photoQueue: [],
+    photosSinceRecap: 0,
+    lastActivityAt: null,
+    namedIdentities: [],
+    v: 5,
   };
 }
 
