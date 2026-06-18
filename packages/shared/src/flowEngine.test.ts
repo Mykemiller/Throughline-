@@ -14,6 +14,7 @@ import {
   dequeuePhoto,
   detectConfirmation,
   enqueuePhoto,
+  extractNamedIdentities,
   hitPhotoSoftCap,
   countPhotoForRecap,
   isFinalChapter,
@@ -23,6 +24,7 @@ import {
   markActivity,
   PHOTO_SOFT_CAP,
   recordConfirmedMoment,
+  recordNamedIdentities,
   resetPhotosSinceRecap,
   reviveSnapshot,
   setActiveMoment,
@@ -197,6 +199,36 @@ test('isOperationalReturn detects a long inactivity gap, not a fresh session', (
   assert.equal(isOperationalReturn(active, Date.parse('2026-06-18T12:01:00Z')), true);
   // 10 min later → still in the same live exchange, not a return.
   assert.equal(isOperationalReturn(active, Date.parse('2026-06-18T08:10:00Z')), false);
+});
+
+test('extractNamedIdentities captures names tied to relationship/naming cues', () => {
+  assert.deepEqual(extractNamedIdentities("That's my dad, Arthur."), ['Arthur']);
+  assert.deepEqual(extractNamedIdentities('my aunt Mary Beth made the gumbo'), ['Mary Beth']);
+  assert.deepEqual(extractNamedIdentities('Arthur, my dad, taught me to fish'), ['Arthur']);
+  assert.deepEqual(extractNamedIdentities('his name was Arthur'), ['Arthur']);
+  assert.deepEqual(extractNamedIdentities('we called her Mae'), ['Mae']);
+});
+
+test('extractNamedIdentities does NOT capture holidays, places, or objects', () => {
+  // Bare "that's X" / "this is X" deliberately not matched (avoids false names).
+  assert.deepEqual(extractNamedIdentities("That's Thanksgiving, the whole family came"), []);
+  assert.deepEqual(extractNamedIdentities('this is the lake house'), []);
+  assert.deepEqual(extractNamedIdentities("my dad's Buick, he washed it every Sunday"), []);
+  assert.deepEqual(extractNamedIdentities(''), []);
+});
+
+test('recordNamedIdentities adds new names once, with first-seen turn', () => {
+  let snap = initialStateSnapshot();
+  snap = recordNamedIdentities(snap, ['Arthur'], 3);
+  assert.deepEqual(snap.namedIdentities, [{ name: 'Arthur', firstSeenTurn: 3 }]);
+  // Same name (any case) on a later turn is not duplicated.
+  snap = recordNamedIdentities(snap, ['arthur', 'Mae'], 5);
+  assert.deepEqual(snap.namedIdentities, [
+    { name: 'Arthur', firstSeenTurn: 3 },
+    { name: 'Mae', firstSeenTurn: 5 },
+  ]);
+  // No new names → same reference returned.
+  assert.equal(recordNamedIdentities(snap, [], 6), snap);
 });
 
 test('reviveSnapshot preserves v5 photo-series fields on round-trip', () => {

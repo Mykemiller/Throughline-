@@ -389,6 +389,78 @@ export function isOperationalReturn(
   return nowMs - last > thresholdMs;
 }
 
+/* ── Intra-session identity capture (item D, deterministic parser) ─────────── */
+
+/** Relationship cues that strongly imply the following word is a person's name. */
+const RELATIONSHIP =
+  '(?:dad|daddy|father|mom|mum|mommy|mother|brother|sister|son|daughter|husband|' +
+  'wife|aunt|auntie|uncle|grandfather|grandmother|grandpa|grandma|granddad|granny|' +
+  'cousin|friend|neighbour|neighbor|partner|fiance|fiancee|boyfriend|girlfriend)';
+
+/** A name: one or two Capitalized tokens (e.g. "Arthur", "Mary Beth"). */
+const NAME = "[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)?";
+
+/**
+ * Deterministically extract subscriber-supplied names from an utterance. HIGH
+ * PRECISION on purpose: only names tied to a relationship cue ("my dad Arthur",
+ * "Arthur, my dad") or an explicit naming verb ("named/called Arthur", "her
+ * name was Mae"). It deliberately does NOT capture bare "that's Arthur" /
+ * "this is Arthur" — those snare holidays, places, and objects ("Thanksgiving",
+ * "July", "Buick"). Under-capturing is the safe failure: Seth only ever REUSES
+ * a captured name as a gentle, correction-open observation, never invents one.
+ */
+export function extractNamedIdentities(utterance: string): string[] {
+  if (!utterance) return [];
+  const found: string[] = [];
+  const patterns = [
+    // "my dad Arthur" / "my aunt, Mae"
+    new RegExp(`\\bmy\\s+${RELATIONSHIP}\\s*,?\\s+(${NAME})`, 'g'),
+    // "Arthur, my dad" / "Mae — my aunt"
+    new RegExp(`\\b(${NAME})\\s*[,—-]\\s*my\\s+${RELATIONSHIP}\\b`, 'g'),
+    // "named Arthur" / "called her Mae" / "his name was Arthur" / "her name is Mae"
+    // Case-sensitive so NAME stays capitalized; cue initials handled explicitly,
+    // and an optional pronoun ("called her Mae") may sit between cue and name.
+    new RegExp(`\\b(?:[Nn]amed|[Cc]alled|[Nn]ame\\s+(?:was|is|'s))\\s+(?:her|him|them)?\\s*(${NAME})`, 'g'),
+  ];
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(utterance)) !== null) {
+      const name = m[1]?.trim();
+      if (name) found.push(name);
+    }
+  }
+  // De-dupe case-insensitively, preserving first-seen order.
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const n of found) {
+    const key = n.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(n);
+    }
+  }
+  return unique;
+}
+
+/**
+ * Record subscriber-supplied names for intra-session reuse (item D). Adds only
+ * names not already known (case-insensitive), stamping the turn first seen.
+ * Idempotent when nothing new is found.
+ */
+export function recordNamedIdentities(
+  snapshot: SessionStateSnapshot,
+  names: string[],
+  turn: number,
+): SessionStateSnapshot {
+  if (names.length === 0) return snapshot;
+  const known = new Set(snapshot.namedIdentities.map((n) => n.name.toLowerCase()));
+  const additions = names
+    .filter((n) => !known.has(n.toLowerCase()))
+    .map((name) => ({ name, firstSeenTurn: turn }));
+  if (additions.length === 0) return snapshot;
+  return { ...snapshot, namedIdentities: [...snapshot.namedIdentities, ...additions] };
+}
+
 /* ── Spoken confirmation detection (E13-04) ───────────────────────────────── */
 
 const AFFIRM = /\b(yes|yeah|yep|yes it does|that's right|thats right|that's it|sounds right|feels right|exactly|correct|perfect|it does|put it on|place it|save it|keep it)\b/i;
