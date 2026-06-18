@@ -43,11 +43,14 @@ import {
   applyChapterComplete,
   applyIntroComplete,
   clearDraft,
+  clearHeldPhotos,
+  countPhotoForRecap,
   dequeuePhoto,
   closeScope,
   confirmedInChapter,
   detectClosedDoor,
   detectConfirmation,
+  enqueuePhoto,
   extractNamedIdentities,
   hitPhotoSoftCap,
   initialStateSnapshot,
@@ -65,7 +68,7 @@ import {
   type SessionStateSnapshot,
 } from '@throughline/shared';
 import { generateSethTurn } from './claude.js';
-import { appendExchange, getSession, updateSession } from './supabase.js';
+import { appendExchange, getSession, insertMediaAsset, updateSession } from './supabase.js';
 import {
   buildMidSessionRecapPrompt,
   buildNextSessionRecapPrompt,
@@ -194,7 +197,10 @@ export async function handleClmRequest(req: Request, res: Response): Promise<voi
 
   // ── 2. Intro phase ────────────────────────────────────────────────────────
   if (snapshot.phase === 'intro') {
-    const introPrompt = buildSethIntroPrompt({ subscriberName: snapshot.subscriberName });
+    const introPrompt = buildSethIntroPrompt({
+      subscriberName: snapshot.subscriberName,
+      heldPhotos: snapshot.heldPhotos,
+    });
     try {
       const result = await generateSethTurn({
         systemPrompt: introPrompt,
@@ -359,6 +365,7 @@ export async function handleClmRequest(req: Request, res: Response): Promise<voi
     carry: snapshot.carry,
     pendingDraft: snapshot.pendingDraft,
     pendingPhoto: snapshot.pendingPhoto,
+    heldPhoto: snapshot.heldPhotos[0] ?? null,
     queuedPhotoCount: snapshot.photoQueue.length,
     operationalReturn,
     namedIdentities: snapshot.namedIdentities,
@@ -410,6 +417,44 @@ export async function handleClmRequest(req: Request, res: Response): Promise<voi
               // This does NOT count toward chapter completeness — that still
               // requires the subscriber's recap confirmation.
               snapshot = setActiveMoment(snapshot, written.momentId);
+
+              // Materialize any photos HELD before this first Moment existed
+              // (e.g. shared during the Introduction): now we have a moment_id,
+              // write their media_assets rows and pin/queue them so the photo
+              // beats run. The bytes + vision review were captured at upload.
+              if (snapshot.heldPhotos.length > 0) {
+                let materialized = 0;
+                for (const held of snapshot.heldPhotos) {
+                  const asset = await safe(() =>
+                    insertMediaAsset({
+                      momentId: written.momentId,
+                      storageUrl: held.storageUrl,
+                      retainOriginal: held.retainOriginal,
+                    }),
+                  );
+                  if (!asset) continue;
+                  snapshot = enqueuePhoto(snapshot, {
+                    assetId: asset.assetId,
+                    momentId: written.momentId,
+                    whenText: held.whenText,
+                    whereText: held.whereText,
+                    description: held.description,
+                    isLikelyPhoto: held.isLikelyPhoto,
+                    visionConfidence: held.visionConfidence,
+                  });
+                  snapshot = countPhotoForRecap(snapshot);
+                  materialized++;
+                }
+                snapshot = clearHeldPhotos(snapshot);
+                await safe(() =>
+                  appendExchange({
+                    sessionId,
+                    role: 'system',
+                    content: `[photos] materialized ${materialized} held photo(s) onto moment ${written.momentId}`,
+                  }),
+                );
+              }
+
               await safe(() =>
                 appendExchange({
                   sessionId,

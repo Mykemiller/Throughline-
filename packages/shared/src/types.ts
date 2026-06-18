@@ -113,6 +113,27 @@ export interface NamedIdentity {
 /** How clearly the vision pass could read the image (Beat 0a gating). */
 export type VisionConfidence = 'high' | 'medium' | 'low';
 
+/**
+ * A photo shared BEFORE any Moment exists (e.g. during the Introduction). Its
+ * bytes are already in Storage and it has been vision-analyzed, but no
+ * `media_assets` row can be written yet (moment_id is NOT NULL). It is held in
+ * the snapshot so Seth can already "see" and acknowledge it, then materialized
+ * into a pinned PendingPhoto the moment the first Moment of the session is
+ * created. The image bytes are NOT stored here — only the Storage URL + the
+ * grounded vision review.
+ */
+export interface HeldPhoto {
+  /** Storage URL of the EXIF-stripped derivative already uploaded. */
+  storageUrl: string;
+  /** Whether the untouched original was retained (opt-in). */
+  retainOriginal: boolean;
+  whenText?: string;
+  whereText?: string;
+  description?: string;
+  isLikelyPhoto?: boolean;
+  visionConfidence?: VisionConfidence;
+}
+
 /** A photo pinned mid-session, awaiting spoken commentary (E13-05/06). */
 export interface PendingPhoto {
   assetId: string;
@@ -207,6 +228,13 @@ export interface SessionStateSnapshot {
    * from speech; never invented. Empty until the subscriber names someone.
    */
   namedIdentities: NamedIdentity[];
+  /**
+   * Photos shared before any Moment existed (e.g. during the Introduction):
+   * already uploaded + vision-analyzed, awaiting the first Moment so a
+   * media_assets row can be written. Materialized into pendingPhoto/photoQueue
+   * the moment one is created. Empty in the common case.
+   */
+  heldPhotos: HeldPhoto[];
   /** Schema version for the snapshot shape itself. */
   v: 5;
 }

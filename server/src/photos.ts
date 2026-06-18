@@ -13,9 +13,9 @@
  * spoken commentary on the next turn (→ Layer 3 Story via the confirm path).
  */
 import type { Request, Response } from 'express';
-import { clearDraft, countPhotoForRecap, enqueuePhoto } from '@throughline/shared';
+import { clearDraft, countPhotoForRecap, enqueuePhoto, holdPhoto } from '@throughline/shared';
 import { describePhotograph } from './claude.js';
-import { getSession, updateSession, uploadAndPinPhoto } from './supabase.js';
+import { getSession, updateSession, uploadAndPinPhoto, uploadPhotoBytes } from './supabase.js';
 
 export async function handlePhotoUpload(req: Request, res: Response): Promise<void> {
   const { sessionId, strippedBase64, originalBase64, retainOriginal, whenText, whereText } =
@@ -43,15 +43,45 @@ export async function handlePhotoUpload(req: Request, res: Response): Promise<vo
     res.status(404).json({ error: 'session not found' });
     return;
   }
+  // No Moment yet (e.g. during the Introduction): we CAN'T write a media_assets
+  // row (moment_id is NOT NULL), but we can still upload the bytes, vision-
+  // analyze them, and HOLD the result so Seth can already see/acknowledge the
+  // photo. It materializes into a pinned asset the moment the first Moment is
+  // created (see clm.ts). This is what lets a photo shared before any Moment be
+  // analyzed instead of stranded client-side.
   if (!session.snapshot.activeMomentId) {
-    console.warn(
-      '[photos] rejected: no active Moment to pin to',
-      JSON.stringify({ sessionId, phase: session.snapshot.phase, chapterId: session.snapshot.chapterId }),
-    );
-    res.status(409).json({
-      error:
-        'no active Moment to pin to yet — confirm a Moment with Seth first, then add the photograph',
-    });
+    try {
+      const stripped = Buffer.from(strippedBase64, 'base64');
+      const original =
+        retainOriginal === true && typeof originalBase64 === 'string'
+          ? Buffer.from(originalBase64, 'base64')
+          : null;
+      const { storageUrl } = await uploadPhotoBytes({
+        key: `_held/${sessionId}/${Date.now()}`,
+        strippedJpeg: stripped,
+        original,
+        retainOriginal: retainOriginal === true,
+      });
+      const review = await describePhotograph({ strippedJpegBase64: strippedBase64 });
+      const snapshot = holdPhoto(session.snapshot, {
+        storageUrl,
+        retainOriginal: retainOriginal === true,
+        whenText: typeof whenText === 'string' && whenText ? whenText : undefined,
+        whereText: typeof whereText === 'string' && whereText ? whereText : undefined,
+        description: review?.description,
+        isLikelyPhoto: review?.isLikelyFamilyPhotograph,
+        visionConfidence: review?.confidence,
+      });
+      await updateSession(sessionId, { snapshot });
+      console.log(
+        '[photos] held (no Moment yet)',
+        JSON.stringify({ sessionId, phase: session.snapshot.phase, held: snapshot.heldPhotos.length }),
+      );
+      res.json({ held: true });
+    } catch (err) {
+      console.error('[photos] hold failed', err);
+      res.status(500).json({ error: 'photo upload failed' });
+    }
     return;
   }
 

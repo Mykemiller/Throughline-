@@ -11,10 +11,12 @@ import {
   canAdvance,
   closeScope,
   confirmedInChapter,
+  clearHeldPhotos,
   dequeuePhoto,
   detectConfirmation,
   enqueuePhoto,
   extractNamedIdentities,
+  holdPhoto,
   hitPhotoSoftCap,
   countPhotoForRecap,
   isFinalChapter,
@@ -229,6 +231,18 @@ test('recordNamedIdentities adds new names once, with first-seen turn', () => {
   ]);
   // No new names → same reference returned.
   assert.equal(recordNamedIdentities(snap, [], 6), snap);
+});
+
+test('holdPhoto accumulates and clearHeldPhotos empties (photo-before-Moment)', () => {
+  let snap = initialStateSnapshot();
+  assert.deepEqual(snap.heldPhotos, []);
+  snap = holdPhoto(snap, { storageUrl: 'photos/_held/s/1/photo.jpg', retainOriginal: false, description: 'a porch' });
+  snap = holdPhoto(snap, { storageUrl: 'photos/_held/s/2/photo.jpg', retainOriginal: true });
+  assert.equal(snap.heldPhotos.length, 2);
+  assert.equal(snap.heldPhotos[0]!.description, 'a porch');
+  snap = clearHeldPhotos(snap);
+  assert.deepEqual(snap.heldPhotos, []);
+  assert.equal(clearHeldPhotos(snap), snap); // idempotent when already empty
 });
 
 test('reviveSnapshot preserves v5 photo-series fields on round-trip', () => {

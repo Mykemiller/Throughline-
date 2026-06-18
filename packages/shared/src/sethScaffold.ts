@@ -23,6 +23,7 @@ import type {
   CareerArcAct,
   ChapterId,
   ClosedScope,
+  HeldPhoto,
   NamedIdentity,
   NuclearEpisode,
   PendingDraft,
@@ -231,6 +232,7 @@ export function initialStateSnapshot(): SessionStateSnapshot {
     photosSinceRecap: 0,
     lastActivityAt: null,
     namedIdentities: [],
+    heldPhotos: [],
     v: 5,
   };
 }
@@ -269,6 +271,12 @@ export interface BuildPromptContext {
   carry: Record<string, string>;
   pendingDraft: PendingDraft | null;
   pendingPhoto: PendingPhoto | null;
+  /**
+   * A photo shared before any Moment exists (held). Seth acknowledges it and
+   * can see it; it pins automatically once a Moment is placed. Ignored when a
+   * pendingPhoto is already in focus.
+   */
+  heldPhoto?: HeldPhoto | null;
   /** Photos waiting behind the in-focus one (batch intake, item A). */
   queuedPhotoCount?: number;
   /** Names the subscriber has supplied this session, for gentle reuse (item D). */
@@ -288,8 +296,29 @@ export interface BuildPromptContext {
  * person's name. When he has the name, he emits intro_complete on the tool
  * channel and flows into First Light — never narrating the mechanics.
  */
-export function buildSethIntroPrompt(ctx: { subscriberName?: string | null }): string {
+/**
+ * A photo arrived before any Moment exists (held). Seth can already SEE it
+ * (bytes uploaded + vision-analyzed) — he should acknowledge it warmly rather
+ * than claim he can't see images. It isn't attached to a memory yet; it pins
+ * automatically once a Moment is placed.
+ */
+function heldPhotoAcknowledgment(held: HeldPhoto | null | undefined): string {
+  if (!held) return '';
+  const unsure = held.isLikelyPhoto === false || held.visionConfidence === 'low';
+  if (unsure) {
+    return `\n\nThe person has shared an image and you tried to look, but it didn't come through clearly enough to make out (it may be a screenshot, a document, or blurry). Warmly tell them you're having a little trouble seeing this one and gently ask if they meant to share a different picture. Never fabricate what's in it, and never claim you simply "can't see images" — you can; this one is just unclear.`;
+  }
+  return `\n\nThe person has shared a PHOTOGRAPH and you CAN see it — do not say you can't see images. Here is a grounded note on what is literally visible: ${
+    held.description ?? '(no clear details available)'
+  } Acknowledge warmly and plainly that the picture came through and that you can see it, and note only what is visible — propose, never assert; NEVER name anyone or guess relationships. It isn't attached to a memory yet, so let them know, lightly, that you'll keep it with their story as the two of you get going — then continue naturally.`;
+}
+
+export function buildSethIntroPrompt(ctx: {
+  subscriberName?: string | null;
+  heldPhotos?: HeldPhoto[];
+}): string {
   const haveName = Boolean(ctx.subscriberName);
+  const heldNote = heldPhotoAcknowledgment(ctx.heldPhotos?.[0]);
   const nameStep = haveName
     ? `You already know their name is ${ctx.subscriberName}. Do not ask again — greet them by it once, warmly.`
     : `You do not yet know their name. After your short introduction, ask for it simply: "Before we start — what should I call you?" Wait for their answer. If they only greet you or say something else first, respond warmly, then ask for their name once.`;
@@ -303,7 +332,7 @@ This turn (and the next one or two) is NOT First Light yet. Your job in the intr
   3. Reassure them they can stop whenever they like and pick the conversation back up later, right where it left off — nothing is lost.
   4. ${nameStep}
 
-Keep it short and human — a few spoken sentences, not a speech. ONE question per turn (the name is your question this turn). Do not list the chapters like a menu; describe the shape of it warmly.
+Keep it short and human — a few spoken sentences, not a speech. ONE question per turn (the name is your question this turn). Do not list the chapters like a menu; describe the shape of it warmly.${heldNote}
 
 When — and only when — you have their name and they seem ready, call the record_first_thread_payload tool with kind:"intro_complete" and their name, then in the SAME turn speak a brief, warm hand-off into the first chapter using First Light's opening: "Think about the house you spent your earliest years in — not the front of it, the inside. Where in that house did you feel most at home?" Never say the word "chapter" aloud, never mention the tool, and never narrate that you're saving anything.`;
 }
@@ -396,6 +425,11 @@ export function buildSethSystemPrompt(ctx: BuildPromptContext): string {
       `BEAT 3 — RECEIVE AMBIENTLY: when they tell you about it, take whatever they give — a story, a single word, or nothing — and let it be enough. Mirror lightly, in their words. Do NOT echo the same way every photo: rotate your move and never repeat it back-to-back — VALIDATE (lightly mirror their words) / SYNTHESIZE (tie this photo to an earlier one from this session) / ACKNOWLEDGE & CLEAR (let a phrase breathe, no echo, then the next question). When something concrete is worth keeping, emit a story_draft via the tool (their words, grounded) — never narrate the save.\n` +
       `If they decline or fall silent in the moment, honor it (Reverence): one gentle acknowledgment, the photo still attaches with no commentary, and you move on without a flicker of pressure.`;
 
+  // A photo shared before any Moment exists — acknowledge it (Seth can see it);
+  // it pins automatically once a Moment is placed. Suppressed once a photo is
+  // actually pinned (pendingPhoto runs the full beats instead).
+  const held = !ctx.pendingPhoto ? heldPhotoAcknowledgment(ctx.heldPhoto) : '';
+
   const completeness =
     ctx.confirmedInChapter > 0 && ctx.followUpSpent
       ? `\n\nThis chapter has a confirmed Moment. When it feels complete, emit chapter_complete via the tool (with a carryDetail) and speak the transition into the next chapter, carrying: ${chapter.transitionCarry}.`
@@ -408,7 +442,7 @@ Chapter opening (use this wording when opening the chapter): "${chapter.openingP
 Primary trigger: ${chapter.primaryTrigger}.
 Nuclear episode focus: ${chapter.nuclearFocus.length ? chapter.nuclearFocus.join(', ') : 'present-moment anchor'}.${
     chapter.extraGuidance ? `\n${chapter.extraGuidance}` : ''
-  }${reentry}${followUp}${closed}${carry}${confirm}${recap}${photo}${completeness}
+  }${reentry}${followUp}${closed}${carry}${confirm}${recap}${held}${photo}${completeness}
 
 Speak as Seth for this turn. If — and only if — the person has shared something concrete worth preserving,
 also call the record_first_thread_payload tool with a grounded draft. Do not mention the tool aloud.`;

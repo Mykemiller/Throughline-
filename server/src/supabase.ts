@@ -173,10 +173,36 @@ export async function uploadAndPinPhoto(args: {
   retainOriginal: boolean;
   caption?: string | null;
 }): Promise<{ assetId: string; storagePath: string }> {
+  const { storageUrl } = await uploadPhotoBytes({
+    key: `${args.momentId}/${Date.now()}`,
+    strippedJpeg: args.strippedJpeg,
+    original: args.original,
+    retainOriginal: args.retainOriginal,
+  });
+  const { assetId } = await insertMediaAsset({
+    momentId: args.momentId,
+    storageUrl,
+    retainOriginal: args.retainOriginal,
+    caption: args.caption ?? null,
+  });
+  return { assetId, storagePath: storageUrl };
+}
+
+/**
+ * Upload the EXIF-stripped derivative (and the original on opt-in) to Storage
+ * under `key`, WITHOUT writing a media_assets row. Used both by uploadAndPinPhoto
+ * and by the "held photo" path (photo shared before any Moment), where no
+ * moment_id exists yet to satisfy the NOT NULL media_assets.moment_id.
+ */
+export async function uploadPhotoBytes(args: {
+  key: string;
+  strippedJpeg: Buffer;
+  original?: Buffer | null;
+  retainOriginal: boolean;
+}): Promise<{ storageUrl: string }> {
   await ensurePhotoBucket();
   const storage = db().storage.from(PHOTO_BUCKET);
-  const base = `${args.momentId}/${Date.now()}`;
-  const derivativePath = `${base}/photo.jpg`;
+  const derivativePath = `${args.key}/photo.jpg`;
 
   const up = await storage.upload(derivativePath, args.strippedJpeg, {
     contentType: 'image/jpeg',
@@ -185,26 +211,35 @@ export async function uploadAndPinPhoto(args: {
   if (up.error) throw new Error(`photo upload failed: ${up.error.message}`);
 
   if (args.retainOriginal && args.original) {
-    const orig = await storage.upload(`${base}/original.jpg`, args.original, {
+    const orig = await storage.upload(`${args.key}/original.jpg`, args.original, {
       contentType: 'image/jpeg',
       upsert: false,
     });
     if (orig.error) throw new Error(`original upload failed: ${orig.error.message}`);
   }
+  return { storageUrl: `${PHOTO_BUCKET}/${derivativePath}` };
+}
 
+/** Insert a media_assets row pinning an already-uploaded derivative to a Moment. */
+export async function insertMediaAsset(args: {
+  momentId: string;
+  storageUrl: string;
+  retainOriginal: boolean;
+  caption?: string | null;
+}): Promise<{ assetId: string }> {
   const { data, error } = await db()
     .from('media_assets')
     .insert({
       moment_id: args.momentId,
       asset_type: 'photo',
-      storage_url: `${PHOTO_BUCKET}/${derivativePath}`,
+      storage_url: args.storageUrl,
       caption: args.caption ?? null,
       retain_original: args.retainOriginal,
     })
     .select('asset_id')
     .single();
   if (error) throw new Error(`media_assets insert failed: ${error.message}`);
-  return { assetId: data.asset_id as string, storagePath: `${PHOTO_BUCKET}/${derivativePath}` };
+  return { assetId: data.asset_id as string };
 }
 
 /** Set/replace the spoken-commentary caption on a pinned photo. */

@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   SETH_SCAFFOLD_VERSION,
+  buildSethIntroPrompt,
   buildSethSystemPrompt,
   type BuildPromptContext,
 } from './sethScaffold.js';
@@ -168,6 +169,53 @@ test('no named identities → no known-names list', () => {
     baseCtx({ pendingPhoto: photo({ description: 'a man by a car', isLikelyPhoto: true, visionConfidence: 'high' }) }),
   );
   assert.ok(!p.includes('already given you this session'));
+});
+
+test('intro prompt: a held photo makes Seth acknowledge he can see it', () => {
+  const p = buildSethIntroPrompt({
+    subscriberName: null,
+    heldPhotos: [{ storageUrl: 's/x', retainOriginal: false, description: 'two people by a river', isLikelyPhoto: true, visionConfidence: 'high' }],
+  });
+  assert.match(p, /shared a PHOTOGRAPH and you CAN see it/);
+  assert.match(p, /two people by a river/);
+  assert.match(p, /do not say you can't see images/);
+});
+
+test('intro prompt: an unreadable held image → trouble-seeing, never "can\'t see images"', () => {
+  const p = buildSethIntroPrompt({
+    subscriberName: null,
+    heldPhotos: [{ storageUrl: 's/x', retainOriginal: false, isLikelyPhoto: false, visionConfidence: 'low' }],
+  });
+  assert.match(p, /having a little trouble seeing this one/);
+  assert.match(p, /never claim you simply "can't see images"/);
+});
+
+test('intro prompt: no held photo → no photo acknowledgment', () => {
+  const p = buildSethIntroPrompt({ subscriberName: null });
+  assert.ok(!p.includes('shared a PHOTOGRAPH'));
+});
+
+test('walk prompt: a held photo is acknowledged when nothing is pinned yet', () => {
+  const p = buildSethSystemPrompt(
+    baseCtx({
+      confirmedInChapter: 0,
+      heldPhoto: { storageUrl: 's/x', retainOriginal: false, description: 'a kitchen', isLikelyPhoto: true, visionConfidence: 'high' },
+    }),
+  );
+  assert.match(p, /shared a PHOTOGRAPH and you CAN see it/);
+  assert.match(p, /a kitchen/);
+});
+
+test('walk prompt: a pinned photo takes precedence over a held one', () => {
+  const p = buildSethSystemPrompt(
+    baseCtx({
+      pendingPhoto: photo({ description: 'a porch', isLikelyPhoto: true, visionConfidence: 'high' }),
+      heldPhoto: { storageUrl: 's/x', retainOriginal: false, description: 'a kitchen' },
+    }),
+  );
+  // Runs the full beats for the pinned photo, not the held acknowledgment.
+  assert.match(p, /BEAT 2 — ELICIT ONE DETAIL/);
+  assert.ok(!p.includes('shared a PHOTOGRAPH and you CAN see it'));
 });
 
 test('reverence preamble distinguishes operational timeout from emotional decline', () => {
