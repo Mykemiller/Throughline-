@@ -313,6 +313,29 @@ export function pinPhoto(
   return { ...snapshot, pendingPhoto: photo };
 }
 
+/**
+ * Intake a photo for the batch flow (item A). If no photo is in focus it
+ * becomes the pinned one; otherwise it queues behind the current photo so a
+ * burst of uploads in one turn is handled one at a time, not all at once.
+ */
+export function enqueuePhoto(
+  snapshot: SessionStateSnapshot,
+  photo: PendingPhoto,
+): SessionStateSnapshot {
+  if (!snapshot.pendingPhoto) return { ...snapshot, pendingPhoto: photo };
+  return { ...snapshot, photoQueue: [...snapshot.photoQueue, photo] };
+}
+
+/**
+ * The current photo is done — bring the next queued photo into focus, or clear
+ * if the queue is empty. Replaces clearPhoto when draining a batch so the
+ * series advances one picture at a time.
+ */
+export function dequeuePhoto(snapshot: SessionStateSnapshot): SessionStateSnapshot {
+  const [next, ...rest] = snapshot.photoQueue;
+  return { ...snapshot, pendingPhoto: next ?? null, photoQueue: rest };
+}
+
 /** Clear the pending photo (commentary captured, or abandoned). */
 export function clearPhoto(snapshot: SessionStateSnapshot): SessionStateSnapshot {
   return { ...snapshot, pendingPhoto: null };

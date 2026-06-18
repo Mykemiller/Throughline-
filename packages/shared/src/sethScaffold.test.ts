@@ -117,6 +117,25 @@ test('vision skipped/failed (no verdict) falls through to the normal beats', () 
   assert.match(p, /BEAT 2 — ELICIT ONE DETAIL/);
 });
 
+test('queued photos add the Beat 0b batch acknowledgment', () => {
+  const p = buildSethSystemPrompt(
+    baseCtx({
+      pendingPhoto: photo({ description: 'a porch', isLikelyPhoto: true, visionConfidence: 'high' }),
+      queuedPhotoCount: 3,
+    }),
+  );
+  assert.match(p, /BEAT 0b — BATCH/);
+  assert.match(p, /3 more are waiting/);
+  assert.match(p, /one at a time/);
+});
+
+test('no queued photos → no batch note', () => {
+  const p = buildSethSystemPrompt(
+    baseCtx({ pendingPhoto: photo({ description: 'a porch', isLikelyPhoto: true, visionConfidence: 'high' }) }),
+  );
+  assert.ok(!p.includes('BEAT 0b — BATCH'));
+});
+
 test('reverence preamble distinguishes operational timeout from emotional decline', () => {
   const p = buildSethSystemPrompt(baseCtx());
   assert.match(p, /Operational silence is NOT an emotional decline/);

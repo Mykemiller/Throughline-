@@ -5,10 +5,11 @@
  * retain opt-in. The photo pins to the active Moment and Seth invites spoken
  * commentary on his next turn.
  *
- * The picker is always available while connected: you can choose a photo at any
- * time. A photo can only be *pinned* to a Moment, so if none is confirmed yet
- * we hold the prepared photo and attach it automatically the moment one is
- * placed on the River — the button is never a dead end.
+ * The picker is always available while connected: you can choose one photo or
+ * several at once. A photo can only be *pinned* to a Moment, so if none is
+ * confirmed yet we hold the prepared photos and attach them automatically the
+ * moment one is placed on the River — the button is never a dead end. A batch
+ * uploads sequentially; the server queues them so Seth takes them one at a time.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { uploadPhoto } from './api';
@@ -29,9 +30,10 @@ export function PhotoCapture({
   const [busy, setBusy] = useState(false);
   const [retainOriginal, setRetainOriginal] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  // A prepared (EXIF-stripped) photo waiting for a Moment to pin to.
-  const [pending, setPending] = useState<PreparedPhoto | null>(null);
-  // Local preview of the selected (EXIF-stripped) photo — never the raw original.
+  // Prepared (EXIF-stripped) photos waiting for a Moment to pin to — a batch
+  // selected before any Moment exists is held here and drained in order.
+  const [pending, setPending] = useState<PreparedPhoto[]>([]);
+  // Local preview of the most recent selected (EXIF-stripped) photo.
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const uploadingRef = useRef(false);
 
@@ -42,15 +44,22 @@ export function PhotoCapture({
     };
   }, [previewUrl]);
 
-  const doUpload = useCallback(
-    async (payload: PreparedPhoto) => {
-      if (uploadingRef.current) return;
+  // Upload a batch sequentially so the server queues them one at a time.
+  const uploadAll = useCallback(
+    async (payloads: PreparedPhoto[]) => {
+      if (uploadingRef.current || payloads.length === 0) return;
       uploadingRef.current = true;
       setBusy(true);
       try {
-        await uploadPhoto(payload);
-        setPending(null);
-        setNote('Photograph placed with this Moment — tell Seth about it.');
+        for (const payload of payloads) {
+          await uploadPhoto(payload);
+        }
+        setPending([]);
+        setNote(
+          payloads.length > 1
+            ? `${payloads.length} photographs placed — Seth will take them one at a time.`
+            : 'Photograph placed with this Moment — tell Seth about it.',
+        );
         onPinned();
       } catch (e) {
         setNote(`Couldn’t add the photograph: ${(e as Error).message}`);
@@ -62,41 +71,55 @@ export function PhotoCapture({
     [onPinned],
   );
 
-  // When a Moment becomes available, attach any photo that was waiting.
+  // When a Moment becomes available, attach any photos that were waiting.
   useEffect(() => {
-    if (pending && hasActiveMoment && !uploadingRef.current) {
-      void doUpload(pending);
+    if (pending.length > 0 && hasActiveMoment && !uploadingRef.current) {
+      void uploadAll(pending);
     }
-  }, [pending, hasActiveMoment, doUpload]);
+  }, [pending, hasActiveMoment, uploadAll]);
 
-  const onFile = async (file: File | undefined) => {
-    if (!file || busy) return;
+  const onFiles = async (fileList: FileList | null) => {
+    const files = fileList ? Array.from(fileList) : [];
+    if (files.length === 0 || busy) return;
     setBusy(true);
     setNote(null);
     try {
-      const bytes = await file.arrayBuffer();
-      const exif = parseExif(bytes);
-      const stripped = await stripExif(file);
-      // Show the cleaned derivative back to the subscriber straight away.
-      setPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return URL.createObjectURL(stripped);
-      });
-      const payload: PreparedPhoto = {
-        sessionId,
-        strippedBase64: await blobToBase64(stripped),
-        retainOriginal,
-        whenText: exif.whenText,
-        whereText: exif.whereText,
-      };
-      if (retainOriginal) payload.originalBase64 = await blobToBase64(file);
+      const payloads: PreparedPhoto[] = [];
+      let lastStripped: Blob | null = null;
+      for (const file of files) {
+        const bytes = await file.arrayBuffer();
+        const exif = parseExif(bytes);
+        const stripped = await stripExif(file);
+        lastStripped = stripped;
+        const payload: PreparedPhoto = {
+          sessionId,
+          strippedBase64: await blobToBase64(stripped),
+          retainOriginal,
+          whenText: exif.whenText,
+          whereText: exif.whereText,
+        };
+        if (retainOriginal) payload.originalBase64 = await blobToBase64(file);
+        payloads.push(payload);
+      }
+      // Show the cleaned derivative of the last selected photo straight away.
+      if (lastStripped) {
+        const blob = lastStripped;
+        setPreviewUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return URL.createObjectURL(blob);
+        });
+      }
 
       if (hasActiveMoment) {
-        await doUpload(payload);
+        await uploadAll(payloads);
       } else {
-        // No Moment yet — hold it; the effect attaches it once one is placed.
-        setPending(payload);
-        setNote('Photograph ready — it will attach as soon as you and Seth place a Moment.');
+        // No Moment yet — hold them; the effect attaches once one is placed.
+        setPending(payloads);
+        setNote(
+          payloads.length > 1
+            ? `${payloads.length} photographs ready — they’ll attach as soon as you and Seth place a Moment.`
+            : 'Photograph ready — it will attach as soon as you and Seth place a Moment.',
+        );
       }
     } catch (e) {
       setNote(`Couldn’t prepare the photograph: ${(e as Error).message}`);
@@ -107,11 +130,13 @@ export function PhotoCapture({
   };
 
   const label = busy
-    ? pending
+    ? pending.length > 0
       ? 'Placing…'
       : 'Preparing…'
-    : pending
-      ? 'Photograph ready'
+    : pending.length > 0
+      ? pending.length > 1
+        ? `${pending.length} photographs ready`
+        : 'Photograph ready'
       : 'Add a photograph';
 
   return (
@@ -120,8 +145,9 @@ export function PhotoCapture({
         ref={inputRef}
         type="file"
         accept="image/*"
+        multiple
         hidden
-        onChange={(e) => void onFile(e.target.files?.[0])}
+        onChange={(e) => void onFiles(e.target.files)}
       />
       <button
         className="ft-btn"
@@ -145,7 +171,7 @@ export function PhotoCapture({
           <img className="ft-photo__preview-img" src={previewUrl} alt="The photograph you just chose" />
         </figure>
       )}
-      {!hasActiveMoment && !pending && !note && (
+      {!hasActiveMoment && pending.length === 0 && !note && (
         <p className="ft-photo__note">
           You can add a photograph anytime — it attaches to a Moment once you’ve placed one with Seth.
         </p>
