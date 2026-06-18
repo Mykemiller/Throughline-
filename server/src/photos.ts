@@ -13,7 +13,7 @@
  * spoken commentary on the next turn (→ Layer 3 Story via the confirm path).
  */
 import type { Request, Response } from 'express';
-import { clearDraft, pinPhoto } from '@throughline/shared';
+import { clearDraft, enqueuePhoto } from '@throughline/shared';
 import { describePhotograph } from './claude.js';
 import { getSession, updateSession, uploadAndPinPhoto } from './supabase.js';
 
@@ -58,8 +58,11 @@ export async function handlePhotoUpload(req: Request, res: Response): Promise<vo
 
     // Pin in the snapshot → Seth invites commentary next turn. Any stale
     // pending draft is cleared so the story confirmation can't cross wires.
+    // enqueuePhoto pins this photo if none is in focus, else queues it behind
+    // the current one — so several uploads in one turn become a calm queue
+    // (batch intake) rather than overwriting each other.
     let snapshot = clearDraft(session.snapshot);
-    snapshot = pinPhoto(snapshot, {
+    snapshot = enqueuePhoto(snapshot, {
       assetId,
       momentId: session.snapshot.activeMomentId,
       whenText: typeof whenText === 'string' && whenText ? whenText : undefined,

@@ -405,9 +405,13 @@ You have just gently recapped the Moments you've been holding onto and asked whe
 AWAITING CONFIRMATION: you proposed "${ctx.pendingDraft.payload.title}" for the River. If the person's last turn was a clear yes, you may consider it placed (the app commits it \u2014 do not say "saved", just move on warmly). If they corrected it, re-propose ONCE with the correction via the tool. If they declined, let it go without comment.` : "";
   const photoWhenHint = ctx.pendingPhoto?.whenText ? ` The photo's file metadata suggests a date of "${ctx.pendingPhoto.whenText}"` + (ctx.pendingPhoto.whereText ? ` and a place near "${ctx.pendingPhoto.whereText}"` : "") + `. Treat this as a soft hint only. If the image itself looks like an older print or scan (black-and-white, faded, period clothing, an old border) while that file date is recent, the date almost certainly records when it was DIGITIZED, not when the moment happened \u2014 do NOT propose it as the memory's date; gently note the gap and ask when the moment itself took place. Otherwise you may offer the date as a question ("the file says maybe ${ctx.pendingPhoto.whenText} \u2014 does that land anywhere near the truth?"), never as established fact.` : "";
   const photoUnsure = ctx.pendingPhoto != null && (ctx.pendingPhoto.isLikelyPhoto === false || ctx.pendingPhoto.visionConfidence === "low");
-  const photo = !ctx.pendingPhoto ? "" : photoUnsure ? `
+  const queued = ctx.queuedPhotoCount ?? 0;
+  const batchNote = queued > 0 ? `
 
-An image was just added, but it did NOT read as a clear family photograph \u2014 it may be a screenshot, a document, a meme, or it was too blurry or unclear to make out. Do NOT invent a description or a memory around it. THIS turn, in your own warm spoken words: gently name that you're having a little trouble seeing it clearly, and ask if they meant to share a different picture (e.g. "Hmm, I'm having trouble making this one out \u2014 it looks like it might be a screenshot. Did you mean to share a different picture with me?"). Don't ask a memory question about it, and describe nothing you can't see. If they say to skip it, set it aside warmly and move on without pressure.` : `
+BEAT 0b \u2014 BATCH: the person handed you several photographs at once \u2014 ${queued} more ${queued === 1 ? "is" : "are"} waiting after this one. Acknowledge the whole handful warmly and make clear you'll take them one at a time, unhurried; do NOT describe them all at once or rush. Begin with THIS one, and the others will come to you in turn.` : "";
+  const photo = !ctx.pendingPhoto ? "" : photoUnsure ? batchNote + `
+
+An image was just added, but it did NOT read as a clear family photograph \u2014 it may be a screenshot, a document, a meme, or it was too blurry or unclear to make out. Do NOT invent a description or a memory around it. THIS turn, in your own warm spoken words: gently name that you're having a little trouble seeing it clearly, and ask if they meant to share a different picture (e.g. "Hmm, I'm having trouble making this one out \u2014 it looks like it might be a screenshot. Did you mean to share a different picture with me?"). Don't ask a memory question about it, and describe nothing you can't see. If they say to skip it, set it aside warmly and move on without pressure.` : batchNote + `
 
 A PHOTOGRAPH was just added to the Moment you're discussing, and you can see it now. Walk it through the photo-series beats this turn, in your own warm, spoken words:
 ` + (ctx.pendingPhoto.description ? `  BEAT 0 \u2014 VALIDITY: here is a grounded note on what is visible \u2014 ${ctx.pendingPhoto.description} If this reads as a real family photograph, continue. If it instead looks like a screenshot, a document, a meme, or is too blurry or unclear to make out, do NOT invent a memory around it \u2014 warmly name that you're having a little trouble seeing it and ask if they meant to share a different picture, then stop there for this turn.
@@ -553,11 +557,13 @@ function recordConfirmedMoment(snapshot, momentId) {
     confirmedMoments: { ...snapshot.confirmedMoments, [snapshot.chapterId]: count }
   };
 }
-function pinPhoto(snapshot, photo) {
-  return { ...snapshot, pendingPhoto: photo };
+function enqueuePhoto(snapshot, photo) {
+  if (!snapshot.pendingPhoto) return { ...snapshot, pendingPhoto: photo };
+  return { ...snapshot, photoQueue: [...snapshot.photoQueue, photo] };
 }
-function clearPhoto(snapshot) {
-  return { ...snapshot, pendingPhoto: null };
+function dequeuePhoto(snapshot) {
+  const [next, ...rest] = snapshot.photoQueue;
+  return { ...snapshot, pendingPhoto: next ?? null, photoQueue: rest };
 }
 var AFFIRM = /\b(yes|yeah|yep|yes it does|that's right|thats right|that's it|sounds right|feels right|exactly|correct|perfect|it does|put it on|place it|save it|keep it)\b/i;
 var DECLINE = /\b(no|nope|not quite|that's not right|thats not right|don't save|do not save|leave it off|take it off|don't keep|skip it|not that)\b/i;
@@ -1278,6 +1284,7 @@ async function handleClmRequest(req, res) {
     carry: snapshot.carry,
     pendingDraft: snapshot.pendingDraft,
     pendingPhoto: snapshot.pendingPhoto,
+    queuedPhotoCount: snapshot.photoQueue.length,
     confirmedInChapter: confirmedInChapter(snapshot),
     recapPending: snapshot.recapPending
   });
@@ -1342,7 +1349,7 @@ async function handleClmRequest(req, res) {
               })
             );
             if (written && snapshot.pendingPhoto) {
-              snapshot = clearPhoto(snapshot);
+              snapshot = dequeuePhoto(snapshot);
             }
             if (written) {
               await safe(
@@ -1420,7 +1427,7 @@ async function handlePhotoUpload(req, res) {
     });
     const review = await describePhotograph({ strippedJpegBase64: strippedBase64 });
     let snapshot = clearDraft(session.snapshot);
-    snapshot = pinPhoto(snapshot, {
+    snapshot = enqueuePhoto(snapshot, {
       assetId,
       momentId: session.snapshot.activeMomentId,
       whenText: typeof whenText === "string" && whenText ? whenText : void 0,

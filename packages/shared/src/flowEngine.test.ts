@@ -11,7 +11,9 @@ import {
   canAdvance,
   closeScope,
   confirmedInChapter,
+  dequeuePhoto,
   detectConfirmation,
+  enqueuePhoto,
   isFinalChapter,
   isIntro,
   jumpToChapter,
@@ -142,6 +144,29 @@ test('setActiveMoment sets the pin target without counting chapter completeness'
   const confirmed = recordConfirmedMoment(pinned, 'm-ambient-1');
   assert.equal(confirmed.activeMomentId, 'm-ambient-1');
   assert.equal(confirmedInChapter(confirmed), 1);
+});
+
+test('enqueuePhoto pins the first photo and queues the rest (batch intake)', () => {
+  const p = (id: string) => ({ assetId: id, momentId: 'm1' });
+  let snap = initialStateSnapshot();
+  snap = enqueuePhoto(snap, p('a'));
+  assert.equal(snap.pendingPhoto?.assetId, 'a'); // first → in focus
+  assert.equal(snap.photoQueue.length, 0);
+
+  snap = enqueuePhoto(snap, p('b'));
+  snap = enqueuePhoto(snap, p('c'));
+  assert.equal(snap.pendingPhoto?.assetId, 'a'); // still in focus
+  assert.deepEqual(snap.photoQueue.map((q) => q.assetId), ['b', 'c']);
+
+  // Draining advances one at a time.
+  snap = dequeuePhoto(snap);
+  assert.equal(snap.pendingPhoto?.assetId, 'b');
+  assert.deepEqual(snap.photoQueue.map((q) => q.assetId), ['c']);
+  snap = dequeuePhoto(snap);
+  assert.equal(snap.pendingPhoto?.assetId, 'c');
+  snap = dequeuePhoto(snap);
+  assert.equal(snap.pendingPhoto, null); // queue drained
+  assert.equal(snap.photoQueue.length, 0);
 });
 
 test('reviveSnapshot preserves v5 photo-series fields on round-trip', () => {

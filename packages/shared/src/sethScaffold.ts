@@ -268,6 +268,8 @@ export interface BuildPromptContext {
   carry: Record<string, string>;
   pendingDraft: PendingDraft | null;
   pendingPhoto: PendingPhoto | null;
+  /** Photos waiting behind the in-focus one (batch intake, item A). */
+  queuedPhotoCount?: number;
   confirmedInChapter: number;
 }
 
@@ -349,11 +351,20 @@ export function buildSethSystemPrompt(ctx: BuildPromptContext): string {
     ctx.pendingPhoto != null &&
     (ctx.pendingPhoto.isLikelyPhoto === false || ctx.pendingPhoto.visionConfidence === 'low');
 
+  // Beat 0b — batch intake: more photos arrived together and are waiting behind
+  // this one. Acknowledge the handful and take them one at a time.
+  const queued = ctx.queuedPhotoCount ?? 0;
+  const batchNote =
+    queued > 0
+      ? `\n\nBEAT 0b — BATCH: the person handed you several photographs at once — ${queued} more ${queued === 1 ? 'is' : 'are'} waiting after this one. Acknowledge the whole handful warmly and make clear you'll take them one at a time, unhurried; do NOT describe them all at once or rush. Begin with THIS one, and the others will come to you in turn.`
+      : '';
+
   const photo = !ctx.pendingPhoto
     ? ''
     : photoUnsure
-      ? `\n\nAn image was just added, but it did NOT read as a clear family photograph — it may be a screenshot, a document, a meme, or it was too blurry or unclear to make out. Do NOT invent a description or a memory around it. THIS turn, in your own warm spoken words: gently name that you're having a little trouble seeing it clearly, and ask if they meant to share a different picture (e.g. "Hmm, I'm having trouble making this one out — it looks like it might be a screenshot. Did you mean to share a different picture with me?"). Don't ask a memory question about it, and describe nothing you can't see. If they say to skip it, set it aside warmly and move on without pressure.`
-      : `\n\nA PHOTOGRAPH was just added to the Moment you're discussing, and you can see it now. Walk it through the photo-series beats this turn, in your own warm, spoken words:\n` +
+      ? batchNote + `\n\nAn image was just added, but it did NOT read as a clear family photograph — it may be a screenshot, a document, a meme, or it was too blurry or unclear to make out. Do NOT invent a description or a memory around it. THIS turn, in your own warm spoken words: gently name that you're having a little trouble seeing it clearly, and ask if they meant to share a different picture (e.g. "Hmm, I'm having trouble making this one out — it looks like it might be a screenshot. Did you mean to share a different picture with me?"). Don't ask a memory question about it, and describe nothing you can't see. If they say to skip it, set it aside warmly and move on without pressure.`
+      : batchNote +
+      `\n\nA PHOTOGRAPH was just added to the Moment you're discussing, and you can see it now. Walk it through the photo-series beats this turn, in your own warm, spoken words:\n` +
       (ctx.pendingPhoto.description
         ? `  BEAT 0 — VALIDITY: here is a grounded note on what is visible — ${ctx.pendingPhoto.description} If this reads as a real family photograph, continue. If it instead looks like a screenshot, a document, a meme, or is too blurry or unclear to make out, do NOT invent a memory around it — warmly name that you're having a little trouble seeing it and ask if they meant to share a different picture, then stop there for this turn.\n`
         : `  BEAT 0 — VALIDITY: you could not make out this image's details this time. Invent nothing. Acknowledge the photograph warmly, and if it may not have come through cleanly, gently ask whether they'd like to try again or show a different one.\n`) +

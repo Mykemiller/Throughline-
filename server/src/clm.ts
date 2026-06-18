@@ -43,7 +43,7 @@ import {
   applyChapterComplete,
   applyIntroComplete,
   clearDraft,
-  clearPhoto,
+  dequeuePhoto,
   closeScope,
   confirmedInChapter,
   detectClosedDoor,
@@ -339,6 +339,7 @@ export async function handleClmRequest(req: Request, res: Response): Promise<voi
     carry: snapshot.carry,
     pendingDraft: snapshot.pendingDraft,
     pendingPhoto: snapshot.pendingPhoto,
+    queuedPhotoCount: snapshot.photoQueue.length,
     confirmedInChapter: confirmedInChapter(snapshot),
     recapPending: snapshot.recapPending,
   });
@@ -414,7 +415,9 @@ export async function handleClmRequest(req: Request, res: Response): Promise<voi
               }),
             );
             if (written && snapshot.pendingPhoto) {
-              snapshot = clearPhoto(snapshot);
+              // Photo's story captured → bring the next queued photo into focus
+              // (or clear if the batch is drained).
+              snapshot = dequeuePhoto(snapshot);
             }
             if (written) {
               await safe(() =>
