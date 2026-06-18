@@ -19,6 +19,7 @@
 import type {
   ChapterCompletePayload,
   ChapterId,
+  HeldPhoto,
   IntroCompletePayload,
   ClosedScope,
   MomentDraftPayload,
@@ -83,6 +84,9 @@ export function reviveSnapshot(raw: unknown): SessionStateSnapshot {
     lastActivityAt: typeof o.lastActivityAt === 'string' ? o.lastActivityAt : null,
     namedIdentities: Array.isArray(o.namedIdentities)
       ? (o.namedIdentities as SessionStateSnapshot['namedIdentities'])
+      : [],
+    heldPhotos: Array.isArray(o.heldPhotos)
+      ? (o.heldPhotos as SessionStateSnapshot['heldPhotos'])
       : [],
   };
 }
@@ -339,6 +343,24 @@ export function dequeuePhoto(snapshot: SessionStateSnapshot): SessionStateSnapsh
 /** Clear the pending photo (commentary captured, or abandoned). */
 export function clearPhoto(snapshot: SessionStateSnapshot): SessionStateSnapshot {
   return { ...snapshot, pendingPhoto: null };
+}
+
+/**
+ * Hold a photo that arrived before any Moment exists (e.g. during the
+ * Introduction). It is already uploaded + vision-analyzed; we keep it until the
+ * first Moment so a media_assets row can be written and it can pin.
+ */
+export function holdPhoto(
+  snapshot: SessionStateSnapshot,
+  held: HeldPhoto,
+): SessionStateSnapshot {
+  return { ...snapshot, heldPhotos: [...snapshot.heldPhotos, held] };
+}
+
+/** Clear all held photos (materialized onto Moments, or session ended). */
+export function clearHeldPhotos(snapshot: SessionStateSnapshot): SessionStateSnapshot {
+  if (snapshot.heldPhotos.length === 0) return snapshot;
+  return { ...snapshot, heldPhotos: [] };
 }
 
 /* ── Recap triggers: soft photo cap + idle/operational return (item B) ─────── */

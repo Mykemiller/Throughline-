@@ -342,6 +342,7 @@ function initialStateSnapshot() {
     photosSinceRecap: 0,
     lastActivityAt: null,
     namedIdentities: [],
+    heldPhotos: [],
     v: 5
   };
 }
@@ -364,8 +365,21 @@ Non-negotiable rules:
 - CONFIRM BEFORE COMMIT: before a Moment is placed on the River, reflect it back in one sentence \u2014 "Here's what I'm placing on your River from this \u2014 does this feel right?" \u2014 and wait for their yes.
 - NEVER-SAY words (user-facing copy): "Unlock", "Seamlessly", "AI-powered", "Dive into", "Your journey". Avoid them entirely.
 - Keep turns short and spoken-natural. You are being heard aloud, not read.`;
+function heldPhotoAcknowledgment(held) {
+  if (!held) return "";
+  const unsure = held.isLikelyPhoto === false || held.visionConfidence === "low";
+  if (unsure) {
+    return `
+
+The person has shared an image and you tried to look, but it didn't come through clearly enough to make out (it may be a screenshot, a document, or blurry). Warmly tell them you're having a little trouble seeing this one and gently ask if they meant to share a different picture. Never fabricate what's in it, and never claim you simply "can't see images" \u2014 you can; this one is just unclear.`;
+  }
+  return `
+
+The person has shared a PHOTOGRAPH and you CAN see it \u2014 do not say you can't see images. Here is a grounded note on what is literally visible: ${held.description ?? "(no clear details available)"} Acknowledge warmly and plainly that the picture came through and that you can see it, and note only what is visible \u2014 propose, never assert; NEVER name anyone or guess relationships. It isn't attached to a memory yet, so let them know, lightly, that you'll keep it with their story as the two of you get going \u2014 then continue naturally.`;
+}
 function buildSethIntroPrompt(ctx) {
   const haveName = Boolean(ctx.subscriberName);
+  const heldNote = heldPhotoAcknowledgment(ctx.heldPhotos?.[0]);
   const nameStep = haveName ? `You already know their name is ${ctx.subscriberName}. Do not ask again \u2014 greet them by it once, warmly.` : `You do not yet know their name. After your short introduction, ask for it simply: "Before we start \u2014 what should I call you?" Wait for their answer. If they only greet you or say something else first, respond warmly, then ask for their name once.`;
   return `${SETH_VOICE_AND_GUARDRAILS}
 
@@ -376,7 +390,7 @@ This turn (and the next one or two) is NOT First Light yet. Your job in the intr
   3. Reassure them they can stop whenever they like and pick the conversation back up later, right where it left off \u2014 nothing is lost.
   4. ${nameStep}
 
-Keep it short and human \u2014 a few spoken sentences, not a speech. ONE question per turn (the name is your question this turn). Do not list the chapters like a menu; describe the shape of it warmly.
+Keep it short and human \u2014 a few spoken sentences, not a speech. ONE question per turn (the name is your question this turn). Do not list the chapters like a menu; describe the shape of it warmly.${heldNote}
 
 When \u2014 and only when \u2014 you have their name and they seem ready, call the record_first_thread_payload tool with kind:"intro_complete" and their name, then in the SAME turn speak a brief, warm hand-off into the first chapter using First Light's opening: "Think about the house you spent your earliest years in \u2014 not the front of it, the inside. Where in that house did you feel most at home?" Never say the word "chapter" aloud, never mention the tool, and never narrate that you're saving anything.`;
 }
@@ -427,6 +441,7 @@ Hard limits: NEVER name or identify anyone in the picture, NEVER guess relations
 INTRA-SESSION IDENTITY: the "never name people" rule guards against you INVENTING an identity \u2014 it is not amnesia. If earlier in THIS conversation they already named someone ("that's my dad, Arthur"), you may gently reuse that name when the same person plausibly reappears ("is that Arthur again?") \u2014 offered as an observation open to correction, never as a hard claim, and never extended to anyone they haven't named themselves.${knownNamesNote}
 BEAT 3 \u2014 RECEIVE AMBIENTLY: when they tell you about it, take whatever they give \u2014 a story, a single word, or nothing \u2014 and let it be enough. Mirror lightly, in their words. Do NOT echo the same way every photo: rotate your move and never repeat it back-to-back \u2014 VALIDATE (lightly mirror their words) / SYNTHESIZE (tie this photo to an earlier one from this session) / ACKNOWLEDGE & CLEAR (let a phrase breathe, no echo, then the next question). When something concrete is worth keeping, emit a story_draft via the tool (their words, grounded) \u2014 never narrate the save.
 If they decline or fall silent in the moment, honor it (Reverence): one gentle acknowledgment, the photo still attaches with no commentary, and you move on without a flicker of pressure.`;
+  const held = !ctx.pendingPhoto ? heldPhotoAcknowledgment(ctx.heldPhoto) : "";
   const completeness = ctx.confirmedInChapter > 0 && ctx.followUpSpent ? `
 
 This chapter has a confirmed Moment. When it feels complete, emit chapter_complete via the tool (with a carryDetail) and speak the transition into the next chapter, carrying: ${chapter.transitionCarry}.` : `
@@ -438,7 +453,7 @@ Current chapter: ${chapter.title} (${chapter.era} \xB7 ${chapter.session === "co
 Chapter opening (use this wording when opening the chapter): "${chapter.openingPrompt}"
 Primary trigger: ${chapter.primaryTrigger}.
 Nuclear episode focus: ${chapter.nuclearFocus.length ? chapter.nuclearFocus.join(", ") : "present-moment anchor"}.${chapter.extraGuidance ? `
-${chapter.extraGuidance}` : ""}${reentry}${followUp}${closed}${carry2}${confirm}${recap}${photo}${completeness}
+${chapter.extraGuidance}` : ""}${reentry}${followUp}${closed}${carry2}${confirm}${recap}${held}${photo}${completeness}
 
 Speak as Seth for this turn. If \u2014 and only if \u2014 the person has shared something concrete worth preserving,
 also call the record_first_thread_payload tool with a grounded draft. Do not mention the tool aloud.`;
@@ -476,7 +491,8 @@ function reviveSnapshot(raw) {
     photoQueue: Array.isArray(o.photoQueue) ? o.photoQueue : [],
     photosSinceRecap: typeof o.photosSinceRecap === "number" ? o.photosSinceRecap : 0,
     lastActivityAt: typeof o.lastActivityAt === "string" ? o.lastActivityAt : null,
-    namedIdentities: Array.isArray(o.namedIdentities) ? o.namedIdentities : []
+    namedIdentities: Array.isArray(o.namedIdentities) ? o.namedIdentities : [],
+    heldPhotos: Array.isArray(o.heldPhotos) ? o.heldPhotos : []
   };
 }
 function nextTurn(snapshot) {
@@ -569,6 +585,13 @@ function enqueuePhoto(snapshot, photo) {
 function dequeuePhoto(snapshot) {
   const [next, ...rest] = snapshot.photoQueue;
   return { ...snapshot, pendingPhoto: next ?? null, photoQueue: rest };
+}
+function holdPhoto(snapshot, held) {
+  return { ...snapshot, heldPhotos: [...snapshot.heldPhotos, held] };
+}
+function clearHeldPhotos(snapshot) {
+  if (snapshot.heldPhotos.length === 0) return snapshot;
+  return { ...snapshot, heldPhotos: [] };
 }
 var PHOTO_SOFT_CAP = 5;
 var IDLE_RETURN_MS = 4 * 60 * 60 * 1e3;
@@ -946,31 +969,48 @@ async function ensurePhotoBucket() {
   }
 }
 async function uploadAndPinPhoto(args) {
+  const { storageUrl } = await uploadPhotoBytes({
+    key: `${args.momentId}/${Date.now()}`,
+    strippedJpeg: args.strippedJpeg,
+    original: args.original,
+    retainOriginal: args.retainOriginal
+  });
+  const { assetId } = await insertMediaAsset({
+    momentId: args.momentId,
+    storageUrl,
+    retainOriginal: args.retainOriginal,
+    caption: args.caption ?? null
+  });
+  return { assetId, storagePath: storageUrl };
+}
+async function uploadPhotoBytes(args) {
   await ensurePhotoBucket();
   const storage = db().storage.from(PHOTO_BUCKET);
-  const base = `${args.momentId}/${Date.now()}`;
-  const derivativePath = `${base}/photo.jpg`;
+  const derivativePath = `${args.key}/photo.jpg`;
   const up = await storage.upload(derivativePath, args.strippedJpeg, {
     contentType: "image/jpeg",
     upsert: false
   });
   if (up.error) throw new Error(`photo upload failed: ${up.error.message}`);
   if (args.retainOriginal && args.original) {
-    const orig = await storage.upload(`${base}/original.jpg`, args.original, {
+    const orig = await storage.upload(`${args.key}/original.jpg`, args.original, {
       contentType: "image/jpeg",
       upsert: false
     });
     if (orig.error) throw new Error(`original upload failed: ${orig.error.message}`);
   }
+  return { storageUrl: `${PHOTO_BUCKET}/${derivativePath}` };
+}
+async function insertMediaAsset(args) {
   const { data, error } = await db().from("media_assets").insert({
     moment_id: args.momentId,
     asset_type: "photo",
-    storage_url: `${PHOTO_BUCKET}/${derivativePath}`,
+    storage_url: args.storageUrl,
     caption: args.caption ?? null,
     retain_original: args.retainOriginal
   }).select("asset_id").single();
   if (error) throw new Error(`media_assets insert failed: ${error.message}`);
-  return { assetId: data.asset_id, storagePath: `${PHOTO_BUCKET}/${derivativePath}` };
+  return { assetId: data.asset_id };
 }
 
 // server/src/riverWrites.ts
@@ -1223,7 +1263,10 @@ async function handleClmRequest(req, res) {
     return;
   }
   if (snapshot.phase === "intro") {
-    const introPrompt = buildSethIntroPrompt({ subscriberName: snapshot.subscriberName });
+    const introPrompt = buildSethIntroPrompt({
+      subscriberName: snapshot.subscriberName,
+      heldPhotos: snapshot.heldPhotos
+    });
     try {
       const result = await generateSethTurn({
         systemPrompt: introPrompt,
@@ -1357,6 +1400,7 @@ async function handleClmRequest(req, res) {
     carry: snapshot.carry,
     pendingDraft: snapshot.pendingDraft,
     pendingPhoto: snapshot.pendingPhoto,
+    heldPhoto: snapshot.heldPhotos[0] ?? null,
     queuedPhotoCount: snapshot.photoQueue.length,
     operationalReturn,
     namedIdentities: snapshot.namedIdentities,
@@ -1399,6 +1443,38 @@ async function handleClmRequest(req, res) {
             );
             if (written) {
               snapshot = setActiveMoment(snapshot, written.momentId);
+              if (snapshot.heldPhotos.length > 0) {
+                let materialized = 0;
+                for (const held of snapshot.heldPhotos) {
+                  const asset = await safe(
+                    () => insertMediaAsset({
+                      momentId: written.momentId,
+                      storageUrl: held.storageUrl,
+                      retainOriginal: held.retainOriginal
+                    })
+                  );
+                  if (!asset) continue;
+                  snapshot = enqueuePhoto(snapshot, {
+                    assetId: asset.assetId,
+                    momentId: written.momentId,
+                    whenText: held.whenText,
+                    whereText: held.whereText,
+                    description: held.description,
+                    isLikelyPhoto: held.isLikelyPhoto,
+                    visionConfidence: held.visionConfidence
+                  });
+                  snapshot = countPhotoForRecap(snapshot);
+                  materialized++;
+                }
+                snapshot = clearHeldPhotos(snapshot);
+                await safe(
+                  () => appendExchange({
+                    sessionId,
+                    role: "system",
+                    content: `[photos] materialized ${materialized} held photo(s) onto moment ${written.momentId}`
+                  })
+                );
+              }
               await safe(
                 () => appendExchange({
                   sessionId,
@@ -1496,13 +1572,35 @@ async function handlePhotoUpload(req, res) {
     return;
   }
   if (!session.snapshot.activeMomentId) {
-    console.warn(
-      "[photos] rejected: no active Moment to pin to",
-      JSON.stringify({ sessionId, phase: session.snapshot.phase, chapterId: session.snapshot.chapterId })
-    );
-    res.status(409).json({
-      error: "no active Moment to pin to yet \u2014 confirm a Moment with Seth first, then add the photograph"
-    });
+    try {
+      const stripped = Buffer.from(strippedBase64, "base64");
+      const original = retainOriginal === true && typeof originalBase64 === "string" ? Buffer.from(originalBase64, "base64") : null;
+      const { storageUrl } = await uploadPhotoBytes({
+        key: `_held/${sessionId}/${Date.now()}`,
+        strippedJpeg: stripped,
+        original,
+        retainOriginal: retainOriginal === true
+      });
+      const review = await describePhotograph({ strippedJpegBase64: strippedBase64 });
+      const snapshot = holdPhoto(session.snapshot, {
+        storageUrl,
+        retainOriginal: retainOriginal === true,
+        whenText: typeof whenText === "string" && whenText ? whenText : void 0,
+        whereText: typeof whereText === "string" && whereText ? whereText : void 0,
+        description: review?.description,
+        isLikelyPhoto: review?.isLikelyFamilyPhotograph,
+        visionConfidence: review?.confidence
+      });
+      await updateSession(sessionId, { snapshot });
+      console.log(
+        "[photos] held (no Moment yet)",
+        JSON.stringify({ sessionId, phase: session.snapshot.phase, held: snapshot.heldPhotos.length })
+      );
+      res.json({ held: true });
+    } catch (err) {
+      console.error("[photos] hold failed", err);
+      res.status(500).json({ error: "photo upload failed" });
+    }
     return;
   }
   try {

@@ -2,14 +2,14 @@
  * Mid-interview photo capture (E13-05/06). Take or choose a photograph; EXIF
  * is parsed AND stripped on-device (see exif.ts); only the clean derivative
  * (plus validated text metadata) is uploaded — the original only on explicit
- * retain opt-in. The photo pins to the active Moment and Seth invites spoken
- * commentary on his next turn.
+ * retain opt-in.
  *
  * The picker is always available while connected: you can choose one photo or
- * several at once. A photo can only be *pinned* to a Moment, so if none is
- * confirmed yet we hold the prepared photos and attach them automatically the
- * moment one is placed on the River — the button is never a dead end. A batch
- * uploads sequentially; the server queues them so Seth takes them one at a time.
+ * several at once, and they upload immediately. If a Moment is already in
+ * focus the photo pins to it; if not (e.g. during the Introduction) the server
+ * HOLDS the analyzed photo and attaches it automatically once you and Seth
+ * place a Moment — Seth can already see it in the meantime. A batch uploads
+ * sequentially; the server queues them so Seth takes them one at a time.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { uploadPhoto } from './api';
@@ -31,9 +31,6 @@ export function PhotoCapture({
   const [busy, setBusy] = useState(false);
   const [retainOriginal, setRetainOriginal] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  // Prepared (EXIF-stripped) photos waiting for a Moment to pin to — a batch
-  // selected before any Moment exists is held here and drained in order.
-  const [pending, setPending] = useState<PreparedPhoto[]>([]);
   // Local preview of the most recent selected (EXIF-stripped) photo.
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const uploadingRef = useRef(false);
@@ -45,27 +42,38 @@ export function PhotoCapture({
     };
   }, [previewUrl]);
 
-  // Upload a batch sequentially so the server queues them one at a time.
+  // Upload a batch sequentially. The server pins to the active Moment, or HOLDS
+  // (uploads + analyzes) when there isn't one yet — either way it's sent now.
   const uploadAll = useCallback(
     async (payloads: PreparedPhoto[]) => {
       if (uploadingRef.current || payloads.length === 0) return;
       uploadingRef.current = true;
       setBusy(true);
       diag.info('photo.upload.start', { count: payloads.length, sessionId });
+      let anyHeld = false;
       try {
         for (const payload of payloads) {
           const result = await uploadPhoto(payload);
-          diag.info('photo.upload.ok', {
-            assetId: result.assetId,
-            momentId: result.momentId,
-            whenText: payload.whenText,
-          });
+          if ('held' in result) {
+            anyHeld = true;
+            diag.info('photo.upload.held', { note: 'analyzed + held; pins when a Moment is placed' });
+          } else {
+            diag.info('photo.upload.ok', {
+              assetId: result.assetId,
+              momentId: result.momentId,
+              whenText: payload.whenText,
+            });
+          }
         }
-        setPending([]);
+        const many = payloads.length > 1;
         setNote(
-          payloads.length > 1
-            ? `${payloads.length} photographs placed — Seth will take them one at a time.`
-            : 'Photograph placed with this Moment — tell Seth about it.',
+          anyHeld
+            ? many
+              ? `${payloads.length} photographs shared — Seth can see them and will keep them with your story as you go.`
+              : 'Photograph shared — Seth can see it and will keep it with your story as you go.'
+            : many
+              ? `${payloads.length} photographs placed — Seth will take them one at a time.`
+              : 'Photograph placed with this Moment — tell Seth about it.',
         );
         onPinned();
       } catch (e) {
@@ -76,15 +84,8 @@ export function PhotoCapture({
         uploadingRef.current = false;
       }
     },
-    [onPinned],
+    [onPinned, sessionId],
   );
-
-  // When a Moment becomes available, attach any photos that were waiting.
-  useEffect(() => {
-    if (pending.length > 0 && hasActiveMoment && !uploadingRef.current) {
-      void uploadAll(pending);
-    }
-  }, [pending, hasActiveMoment, uploadAll]);
 
   const onFiles = async (fileList: FileList | null) => {
     const files = fileList ? Array.from(fileList) : [];
@@ -131,25 +132,8 @@ export function PhotoCapture({
           return URL.createObjectURL(blob);
         });
       }
-
-      if (hasActiveMoment) {
-        await uploadAll(payloads);
-      } else {
-        // No Moment yet — hold them; the effect attaches once one is placed.
-        // This is the common "photo never reaches the server" cause: a photo
-        // shared before any Moment exists (e.g. during the Introduction) sits
-        // here until the conversation produces one.
-        diag.warn('photo.held.no_active_moment', {
-          count: payloads.length,
-          note: 'upload deferred until a Moment is placed; no POST /api/photos yet',
-        });
-        setPending(payloads);
-        setNote(
-          payloads.length > 1
-            ? `${payloads.length} photographs ready — they’ll attach as soon as you and Seth place a Moment.`
-            : 'Photograph ready — it will attach as soon as you and Seth place a Moment.',
-        );
-      }
+      // Always upload now — the server pins or holds as appropriate.
+      await uploadAll(payloads);
     } catch (e) {
       diag.error('photo.prepare.error', { message: (e as Error).message });
       setNote(`Couldn’t prepare the photograph: ${(e as Error).message}`);
@@ -159,15 +143,7 @@ export function PhotoCapture({
     }
   };
 
-  const label = busy
-    ? pending.length > 0
-      ? 'Placing…'
-      : 'Preparing…'
-    : pending.length > 0
-      ? pending.length > 1
-        ? `${pending.length} photographs ready`
-        : 'Photograph ready'
-      : 'Add a photograph';
+  const label = busy ? 'Sharing…' : 'Add a photograph';
 
   return (
     <div className="ft-photo">
@@ -201,9 +177,10 @@ export function PhotoCapture({
           <img className="ft-photo__preview-img" src={previewUrl} alt="The photograph you just chose" />
         </figure>
       )}
-      {!hasActiveMoment && pending.length === 0 && !note && (
+      {!hasActiveMoment && !note && (
         <p className="ft-photo__note">
-          You can add a photograph anytime — it attaches to a Moment once you’ve placed one with Seth.
+          You can add a photograph anytime — Seth can see it right away, and it attaches to your story
+          as the two of you place a Moment.
         </p>
       )}
       {note && <p className="ft-photo__note">{note}</p>}

@@ -71,7 +71,11 @@ export async function setChapter(
   );
 }
 
-/** Upload an EXIF-stripped photo; pins to the session's active Moment. */
+/**
+ * Upload an EXIF-stripped photo. If a Moment is in focus it pins immediately
+ * (`{assetId, momentId}`); if not, the server holds the analyzed photo until a
+ * Moment is placed (`{held: true}`).
+ */
 export async function uploadPhoto(args: {
   sessionId: string;
   strippedBase64: string;
@@ -79,7 +83,7 @@ export async function uploadPhoto(args: {
   retainOriginal: boolean;
   whenText?: string;
   whereText?: string;
-}): Promise<{ assetId: string; momentId: string }> {
+}): Promise<{ assetId: string; momentId: string } | { held: true }> {
   return json(
     await fetch('/api/photos', {
       method: 'POST',
